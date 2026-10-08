@@ -76,6 +76,11 @@ SYNTENY_FOLD = 3
 SYNTENY_FLANK_MIN_BP = 100_000
 SYNTENY_FLANK_MAX_BP = 5_000_000
 
+# Collinear chain for projections: pieces whose diagonal offset lies within max(1 Mb, half the
+# projected interval) of the weighted mode (indel drift across a segment stays well inside this;
+# repeat hits elsewhere on the chromosome fall outside).
+CHAIN_TOL_MIN_BP = 1_000_000
+
 # A homoeologue is assigned to an HE segment only if the self alignment covers at least this
 # fraction of it (otherwise 'unpaired').
 HOMOEOLOG_MIN_COVER = 0.25

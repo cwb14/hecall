@@ -14,9 +14,11 @@ from . import params as PR
 def project(aln, a, b):
     """Project query interval [a,b) through alignments, robustly.
 
-    Returns dict(target, lo, hi, t_med, q_med, bp) for the target chromosome holding most aligned
-    bases, with lo/hi = 5th/95th and t_med = 50th aligned-base-weighted percentile of target
-    positions (stray repeat alignments elsewhere on the target do not stretch the interval), or None."""
+    On the target chromosome holding most aligned bases, only the dominant collinear chain is used
+    (main strand, diagonal offset within max(CHAIN_TOL_MIN_BP, half the interval) of the weighted
+    mode), so repeat alignments elsewhere on the target do not stretch the interval. Returns
+    dict(target, lo, hi, t_med, q_med, bp) with lo/hi = 5th/95th and t_med = 50th aligned-base-
+    weighted percentile of chain target positions, bp = aligned bases on the chain; or None."""
     if aln is None:
         return None
     sel = np.flatnonzero((aln["qs"] < b) & (aln["qe"] > a))
@@ -34,6 +36,21 @@ def project(aln, a, b):
         tot[t] = tot.get(t, 0.0) + ww
     best = max(tot, key=tot.get)
     m = tg == best
+    # keep the dominant collinear chain: pieces on the main strand whose diagonal offset (target -
+    # query, or target + query on the reverse strand) lies near the aligned-base-weighted mode
+    tmid, qmid = ((t0 + t1) / 2.0)[m], ((x0 + x1) / 2.0)[m]
+    fw_m, w_m = fwd[m], w[m]
+    off = np.where(fw_m, tmid - qmid, tmid + qmid)
+    strand = fw_m if w_m[fw_m].sum() >= w_m[~fw_m].sum() else ~fw_m
+    tol = max(PR.CHAIN_TOL_MIN_BP, 0.5 * (b - a))
+    binw = max(PR.CHAIN_TOL_MIN_BP / 10, 0.05 * (b - a))
+    o_s = off[strand]
+    edges = np.arange(o_s.min(), o_s.max() + 2 * binw, binw)
+    hist, _ = np.histogram(o_s, bins=edges, weights=w_m[strand])
+    mode = edges[int(np.argmax(hist))] + binw / 2
+    chain = strand & (np.abs(off - mode) <= tol)
+    m = np.flatnonzero(m)[chain]
+    m = np.isin(np.arange(tg.size), m)
     lo_, hi_, wm = np.minimum(t0, t1)[m].astype(float), np.maximum(t0, t1)[m].astype(float), w[m]
     qm = ((x0 + x1) / 2.0)[m]
 
