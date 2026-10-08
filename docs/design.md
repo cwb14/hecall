@@ -1,6 +1,6 @@
 # hecall design note
 
-Date: 2026-10-08. Status: approved design (chat, 2026-10-08); aligner choice pending benchmark (section 3).
+Date: 2026-10-08. Status: approved design (chat, 2026-10-08); implemented in hecall 0.1.0.
 
 ## 1. Goal
 
@@ -112,22 +112,34 @@ Pre-polyploid introgression into a donor shows neither signature.
 - No subgenome structure (e.g. Rosa 'Carola' haplotypes) shows up as unresolvable pairs; the tool
   does not force a call.
 
-## 3. Alignment
+## 3. Alignment (benchmarked 2026-10-08)
 
-Pending benchmark on *Coffea arabica* (polyploid C+E, 1.2 Gb, vs *C. canephora*, 0.6 Gb):
+Benchmark: *Coffea arabica* polyploid C+E (1.2 Gb) vs *C. canephora* (0.6 Gb), 8 threads.
 
-- FastGA (adaptive seeds, all local alignments ≥ 100 bp at ≥ 70% identity) + ALNchain (1:1 chains
-  per sequence pair)
-- versus minimap2 2.30 `-x asm20 -c --cs --secondary=no` (whole-genome index)
+| aligner | wall | peak RAM | chr01C covered by own parent (best hit/base) | SNV divergence |
+|---|---|---|---|---|
+| minimap2 2.30 -x asm20 -c --cs --secondary=no | 56.5 min | 112 GB | 61.6% | 1.92% |
+| FastGA (defaults) + ALNchain (defaults) | 6.3 min (+0.5 min chain/PAF) | 2.4 GB | 60.6% | 1.94% |
+| FastGA + ALNchain -g1M -p0.001 -z10k -s5000 | same | same | 92.0% | 2.90% |
 
-Criteria:
-
-- wall time and memory
-- polyploid bases covered by the parent of the same subgenome (orthologous)
-- bases covered by the other parent (homoeologous; this limits the number of informative sites)
-
-The same aligner and settings are used for every reference, so alignability is symmetric between
-states.
+- **Choice: FastGA + ALNchain with defaults.** Coverage and divergence are the same as minimap2's
+  primary chains, at about 1/6 of the time and 1/40 of the memory.
+- Relaxed chaining inflates coverage with repeat alignments. The extra coverage is spread over all
+  *canephora* chromosomes at a median 90% identity, so it is not orthologous.
+- About 40% of chr01C does not align to its own parent in any setting. These are TE-rich regions
+  turned over since the species split; they become nocall regions.
+- The user's alternatives:
+  - Syntenic-chunk alignment is unnecessary at FastGA's speed.
+  - sassy does pattern search, not genome alignment.
+  - mm2-plus is not installed.
+- Per base, the least divergent chained alignment supplies the reference allele. The orthologue or
+  homoeologue is the closest copy; older paralogues are more diverged. Indel bases inside a better
+  alignment are not filled from worse ones.
+- Inter-subgenome transposed TEs are removed twice:
+  - by ALNchain, as short isolated chains (synthetic decoy test)
+  - by the per-HE synteny check (FILTER `nonsyntenic`)
+- The self alignment (FastGA on the polyploid alone) reports both directions. It provides the
+  homoeologue of every base.
 
 ## 4. Inputs / outputs
 

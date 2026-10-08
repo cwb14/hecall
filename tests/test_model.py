@@ -1,58 +1,65 @@
-"""HMM on simulated site patterns (no aligner needed)."""
+"""Window-level origin HMM on simulated windows (no aligner needed)."""
 import numpy as np
 
 from hecall import model
 
-# pattern ids: 0 = matches ref1 only, 1 = matches ref2 only, 2 = private, 3 = triallelic
-PROFILE = {0: [0.90, 0.07, 0.02, 0.01],   # subgenome 0 (donor 1)
-           1: [0.07, 0.90, 0.02, 0.01]}   # subgenome 1 (donor 2)
 
-
-def sim_chrom(name, label, length, density, rng, foreign=()):
-    n = rng.poisson(length * density)
-    pos = np.sort(rng.choice(length, size=n, replace=False))
-    state = np.full(n, label)
+def sim(label, n, rng, foreign=(), mu=(1.2, -1.2), sd=0.6, span=2000):
+    """1-D origin feature per window: state 0 ~ N(mu0, sd), state 1 ~ N(mu1, sd)."""
+    st = np.full(n, label)
     for a, b, s in foreign:
-        state[(pos >= a) & (pos < b)] = s
-    pid = np.array([rng.choice(4, p=PROFILE[s]) for s in state])
-    return {"name": name, "length": length, "label": label, "site_pos": pos.astype(np.int64),
-            "site_pid": pid.astype(np.int64)}
+        st[a:b] = s
+    x = rng.normal(np.take(mu, st), sd)
+    start = np.arange(n) * span
+    return {"label": label, "X": x[:, None], "d": np.full(n, float(span)), "start": start,
+            "end": start + span, "length": n * span}
 
 
-def test_recovers_planted_segment_and_null_chromosome():
-    rng = np.random.default_rng(3)
-    chroms = [sim_chrom("A1", 0, 2_000_000, 0.01, rng, foreign=[(800_000, 830_000, 1)]),
-              sim_chrom("A2", 0, 2_000_000, 0.01, rng),
-              sim_chrom("B1", 1, 2_000_000, 0.01, rng),
-              sim_chrom("B2", 1, 2_000_000, 0.01, rng)]
-    fit = model.run(chroms, 2, 4)
+def test_recovers_planted_run_and_null_chromosomes():
+    rng = np.random.default_rng(1)
+    wins = [sim(0, 1000, rng, foreign=[(400, 420, 1)]), sim(0, 1000, rng), sim(1, 1000, rng), sim(1, 1000, rng)]
+    fit = model.run(wins, 2)
     found = []
-    for c, b, p in zip(chroms, fit["binned"], fit["post"]):
-        for s in model.segments(c, b, p, fit["logp"]):
-            if s["state"] != c["label"]:
-                found.append((c["name"], s["start"], s["end"], model.qual(s["post_mean"])))
+    for i, (w, p) in enumerate(zip(wins, fit["post"])):
+        st = p.argmax(axis=1)
+        for a, b, s in model._runs(st):
+            if s != w["label"]:
+                found.append((i, a, b, model.qual(p[a:b, s].mean())))
     assert len(found) == 1
-    name, a, b, q = found[0]
-    assert name == "A1" and abs(a - 800_000) < 2_000 and abs(b - 830_000) < 2_000 and q >= 20
+    i, a, b, q = found[0]
+    assert i == 0 and abs(a - 400) <= 2 and abs(b - 420) <= 2 and q >= 20
+    res = model.resolution(fit, wins, 2)
+    assert all(r["resolvable"] for r in res)
 
 
-def test_indistinguishable_profiles_unresolvable():
-    rng = np.random.default_rng(4)
-    global PROFILE
-    saved = dict(PROFILE)
-    PROFILE = {0: [0.5, 0.48, 0.01, 0.01], 1: [0.49, 0.49, 0.01, 0.01]}
-    try:
-        chroms = [sim_chrom("A1", 0, 1_000_000, 0.002, rng), sim_chrom("B1", 1, 1_000_000, 0.002, rng)]
-        fit = model.run(chroms, 2, 4)
-        res = model.resolution(fit["logp"], chroms, 2, fit["rho"])
-        assert not any(r["resolvable"] for r in res)
-    finally:
-        PROFILE = saved
+def test_indistinguishable_origins_unresolvable():
+    rng = np.random.default_rng(2)
+    wins = [sim(0, 500, rng, mu=(0.0, 0.05)), sim(1, 500, rng, mu=(0.0, 0.05))]
+    fit = model.run(wins, 2)
+    assert not any(r["resolvable"] for r in model.resolution(fit, wins, 2))
 
 
 def test_refine_breakpoint_finds_switch():
     pos = np.arange(0, 1000, 10)
-    left = np.where(pos < 500, -0.1, -2.0)     # log P under left state
+    left = np.where(pos < 500, -0.1, -2.0)
     right = np.where(pos < 500, -2.0, -0.1)
-    ml_lo, ml_hi, ci_lo, ci_hi = model.refine_breakpoint(pos, left, right)
+    _, ml_lo, ml_hi, ci_lo, ci_hi = model.refine_breakpoint(pos, left, right)
     assert ml_lo <= 500 <= ml_hi and ci_lo <= ml_lo and ci_hi >= ml_hi
+
+
+def test_segment_cuts_ordered_and_positive():
+    """Short foreign runs next to each other: tiles must stay ordered with positive length."""
+    rng = np.random.default_rng(3)
+    w = sim(0, 300, rng, foreign=[(100, 102, 1), (104, 106, 1)])
+    w["start"], w["end"] = np.arange(300) * 2000, np.arange(300) * 2000 + 2000
+    pos = np.arange(0, 600_000, 50, dtype=np.int64)
+    chrom = {"length": 600_000, "label": 0, "site_pos": pos, "site_pid": rng.integers(0, 2, pos.size)}
+    post = np.zeros((300, 2))
+    post[:, 0] = 1
+    post[[100, 101, 104, 105]] = [0.2, 0.8]
+    binned = {"E": np.zeros((300, 2))}
+    slogp = np.log(np.array([[0.8, 0.2], [0.2, 0.8]]))
+    segs = model.segments(chrom, w, post, binned, slogp)
+    tiles = [(s["tile_start"], s["tile_end"]) for s in segs]
+    assert all(b > a for a, b in tiles)
+    assert all(t1[0] == t0[1] for t0, t1 in zip(tiles[:-1], tiles[1:]))

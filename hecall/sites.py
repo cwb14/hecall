@@ -88,20 +88,22 @@ def codes_for_chrom(records, qlen):
 
 
 def informative_sites(code_mat, min_covered=2):
-    """code_mat: (K, L) uint8 codes of K references on one chromosome.
+    """Diagnostic sites of one chromosome. code_mat: (K, L) uint8 codes of K references.
 
-    Returns (positions, pattern_keys). A site is informative when >= min_covered references cover
-    it and at least one covered reference mismatches. The pattern key encodes one symbol per
-    reference (index into SYMBOLS) in base 6, with mismatching alleles relabelled by first
-    appearance so that 'aM' and 'bM' are the same pattern.
+    A site is diagnostic when >= min_covered references cover it, the covered references do not
+    all carry the same allele, and the polyploid matches at least one of them. Returns (positions,
+    pattern keys); the key holds one symbol per reference (index into SYMBOLS) in base 6, with
+    mismatching alleles relabelled by first appearance ('aM' and 'bM' are the same pattern).
     """
     K, L = code_mat.shape
     covered = (code_mat >= 1) & (code_mat <= 5)
     n_cov = covered.sum(axis=0)
+    n_match = (code_mat == MATCH).sum(axis=0)
     any_mm = ((code_mat >= 2) & (code_mat <= 5)).any(axis=0)
-    pos = np.flatnonzero((n_cov >= min_covered) & any_mm)
-    sub = code_mat[:, pos].astype(np.int16)
+    cand = np.flatnonzero((n_cov >= min_covered) & (n_match >= 1) & any_mm)
+    sub = code_mat[:, cand].astype(np.int16)
     sub[(sub == AMBIG)] = 0
+    pos = cand
     n = pos.size
     label = np.full((n, 4), -1, dtype=np.int16)  # allele (A,C,G,T) -> canonical letter index
     nxt = np.zeros(n, dtype=np.int16)
@@ -115,14 +117,10 @@ def informative_sites(code_mat, min_covered=2):
         if mm.any():
             a = c[mm] - 2
             ii = idx[mm]
-            lab = label[ii, a]
-            new = lab < 0
-            # assign new letters in order of reference index (first appearance)
-            lab_new = nxt[ii[new]]
-            label[ii[new], a[new]] = lab_new
+            new = label[ii, a] < 0
+            label[ii[new], a[new]] = nxt[ii[new]]
             nxt[ii[new]] += 1
-            lab = label[ii, a]
-            sym[mm] = 2 + lab
+            sym[mm] = 2 + label[ii, a]
         key += sym * (6 ** j)
     return pos, key
 
@@ -133,3 +131,4 @@ def key_to_pattern(key, K):
         s.append(SYMBOLS[key % 6])
         key //= 6
     return "".join(s)
+

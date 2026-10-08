@@ -7,12 +7,13 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.patches import Rectangle, Patch  # noqa: E402
-from matplotlib.lines import Line2D  # noqa: E402
+
+from . import params as PR  # noqa: E402
 
 # Okabe-Ito order; first four pass all-pairs CVD dE >= 8 (dataviz validator). Further hues are
 # only legal with direct labels (column headers name each subgenome).
 ORIGIN_COLORS = ["#0072B2", "#E69F00", "#009E73", "#D55E00", "#CC79A7", "#56B4E9"]
-GREY = "#9a9a9a"
+UNCERTAIN = "#dcdcdc"
 
 
 def _tint(hexc, f):
@@ -45,10 +46,10 @@ def painting(outdir, labels, chroms, segs, he, nocall, max_rows=None):
                 a, b = s["tile_start"], s["tile_end"]
                 if s.get("nosites"):
                     fc = "white"
-                elif s["state"] == c["label_idx"]:
-                    fc = _tint(color[s["state"]], 0.62)
+                elif s["qual"] < PR.QUAL_PASS:
+                    fc = UNCERTAIN
                 else:
-                    fc = _tint(color[s["state"]], 0.62)  # non-PASS foreign: drawn as tint + hatch below
+                    fc = _tint(color[s["state"]], 0.62)
                 ax.add_patch(Rectangle((a, y - bar / 2), b - a, bar, fc=fc, ec="none", lw=0))
             for h in he_by.get(c["name"], []):
                 d = labels.index(h["donor"])
@@ -57,9 +58,6 @@ def painting(outdir, labels, chroms, segs, he, nocall, max_rows=None):
                                            fc=color[d], ec="none", lw=0, zorder=3))
                     ax.plot([(h["start"] + h["end"]) / 2], [y + bar / 2 + 0.17], marker="v", ms=3.2,
                             color=color[d], mec="none", zorder=4, clip_on=False)
-                else:
-                    ax.add_patch(Rectangle((h["start"], y - bar / 2), h["end"] - h["start"], bar,
-                                           fc="none", ec=color[d], lw=0, hatch="//////", zorder=2))
             for a, b, _ in nocall[c["name"]]:
                 ax.add_patch(Rectangle((a, y - bar / 2), b - a, bar, fc="white", ec="none", zorder=2.5))
                 ax.add_patch(Rectangle((a, y - bar / 2), b - a, bar, fc="none", ec="#c8c8c8", lw=0,
@@ -81,7 +79,7 @@ def painting(outdir, labels, chroms, segs, he, nocall, max_rows=None):
         ax.text(0, nrow - 0.2 + 0.25, f"Subgenome {lab}", fontsize=7.5, ha="left", va="bottom")
     handles = [Patch(fc=_tint(color[i], 0.62), ec="none", label=f"{lab} origin") for i, lab in enumerate(labels)]
     handles += [Patch(fc=color[i], ec="none", label=f"exchange from {lab} (PASS)") for i, lab in enumerate(labels)]
-    handles += [Patch(fc="white", ec=GREY, hatch="//////", lw=0.4, label="candidate, not PASS"),
+    handles += [Patch(fc=UNCERTAIN, ec="none", label="origin uncertain (QUAL < 20)"),
                 Patch(fc="white", ec="#c8c8c8", hatch="xxxx", lw=0.4, label="not evaluable")]
     fig.legend(handles=handles, loc="lower center", ncol=min(4, len(handles)), fontsize=6, frameon=False,
                bbox_to_anchor=(0.5, 0.0), handlelength=1.6, columnspacing=1.2)
@@ -110,16 +108,17 @@ def _legend(outdir, labels, chroms, he, nocall):
     with open(os.path.join(outdir, "painting_legend.md"), "w") as fh:
         fh.write(
             "# painting\n\n"
-            "Origin = the subgenome donor whose sequence a stretch of chromosome most resembles, judged at "
-            "single-base sites where the reference genomes differ. A homoeologous exchange (HE) is a stretch "
+            "Origin = the subgenome donor whose sequence a stretch of chromosome most resembles, judged from its "
+            "divergence to every reference genome in windows of equal information, against the spread seen in "
+            "the polyploid's own subgenomes. A homoeologous exchange (HE) is a stretch "
             "whose origin differs from the chromosome's own subgenome. PASS = posterior probability ≥ 0.99 "
             "(QUAL ≥ 20), syntenic with the donor-like reference, and a donor/recipient pair the data can tell "
             "apart.\n\n"
             f"Each polyploid chromosome is drawn to scale, grouped by subgenome ({', '.join(labels)}). Pale fill "
             "shows the inferred origin along the chromosome; saturated blocks are PASS HEs, coloured by donor, "
-            "each marked by a triangle so that exchanges too small to see at this scale remain visible. Hatched "
-            "outlines are candidate segments that failed a filter; grey cross-hatching marks regions without "
-            "enough informative sites to detect an HE of the minimum detectable size. "
+            "each marked by a triangle so that exchanges too small to see at this scale remain visible. Light "
+            "grey marks stretches whose origin is uncertain (QUAL < 20); grey cross-hatching marks regions "
+            "too sparsely aligned to evaluate. "
             f"{len(p)} PASS HEs ({types['reciprocal']} reciprocal, {types['non-reciprocal']} non-reciprocal, "
             f"{types['unpaired']} without an assignable homoeologue); median length {med}. "
             f"{100 * nc / tot:.1f}% of the assembly was not evaluable.\n")

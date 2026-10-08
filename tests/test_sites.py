@@ -33,6 +33,7 @@ def test_informative_patterns_canonical():
                     [A, M, C, M, M],
                     [A, M, A, A, M]], dtype=np.uint8)
     pos, key = sites.informative_sites(mat, 2)
-    assert list(pos) == [0, 1, 2, 3]           # last column: all match -> not informative
+    # col 2: polyploid matches no reference (private) -> not diagnostic; col 4: all match
+    assert list(pos) == [0, 1, 3]
     pats = [sites.key_to_pattern(int(k), 3) for k in key]
-    assert pats == ["Maa", "aMM", "aba", ".Ma"]
+    assert pats == ["Maa", "aMM", ".Ma"]

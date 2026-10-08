@@ -29,11 +29,12 @@ def _f(x, nd=4):
     return str(x)
 
 
-def write_all(outdir, labels, refs, chroms, segs, he, nocall, chrom_rows, fit, res, pattern_names, data):
+def write_all(outdir, labels, refs, chroms, segs, he, nocall, chrom_rows, fit, wins, res, slogp,
+              pattern_names, data):
     rnames = [r[0] for r in refs]
-    # he.tsv
+    S = len(labels)
     cols = ["chrom", "start", "end", "length", "label", "donor", "qual", "filter", "type", "llr",
-            "n_sites", "n_support", "n_against", "core_start", "core_end", "bp_left_ci", "bp_right_ci",
+            "n_windows", "n_sites", "n_support", "n_against", "bp_left_ci", "bp_right_ci",
             "syntenic", "closest_ref", "ref_target"] + [f"div_{n}" for n in rnames] + \
            ["homoeolog", "homoeolog_frac_recipient_origin", "ss_div", "ss_div_baseline", "ss_cover", "flags"]
     with open(os.path.join(outdir, "he.tsv"), "w") as fh:
@@ -44,16 +45,14 @@ def write_all(outdir, labels, refs, chroms, segs, he, nocall, chrom_rows, fit, r
             row["syntenic"] = "." if h["syntenic"] is None else ("yes" if h["syntenic"] else "no")
             for n, v in zip(rnames, h["ref_div"]):
                 row[f"div_{n}"] = v
-            fh.write("\t".join(_f(row.get(c)) if not isinstance(row.get(c), str) else row[c] for c in cols) + "\n")
-    # he.gff3 (all candidates; FILTER in attributes)
+            fh.write("\t".join(row[c] if isinstance(row.get(c), str) else _f(row.get(c)) for c in cols) + "\n")
     with open(os.path.join(outdir, "he.gff3"), "w") as fh:
         fh.write("##gff-version 3\n")
         for i, h in enumerate(sorted(he, key=lambda h: (h["chrom"], h["start"])), 1):
             attr = (f"ID=HE{i};donor={h['donor']};recipient={h['label']};qual={h['qual']};"
-                    f"filter={h['filter']};type={h['type']};n_sites={h['n_sites']};flags={h['flags']}")
+                    f"filter={h['filter']};type={h['type']};n_windows={h['n_windows']};flags={h['flags']}")
             fh.write(f"{h['chrom']}\thecall\thomoeologous_exchange\t{h['start'] + 1}\t{h['end']}\t"
                      f"{h['qual']}\t.\t.\t{attr}\n")
-    # segments.bed: full origin painting
     with open(os.path.join(outdir, "segments.bed"), "w") as fh:
         fh.write("#chrom\tstart\tend\torigin\tscore\tstrand\tlabel\tqual\n")
         for c in chroms:
@@ -71,50 +70,32 @@ def write_all(outdir, labels, refs, chroms, segs, he, nocall, chrom_rows, fit, r
         fh.write("\t".join(keys) + "\n")
         for r in chrom_rows:
             fh.write("\t".join(_f(r[k]) for k in keys) + "\n")
-    # profiles
-    p = np.exp(fit["logp"])
+    p = np.exp(slogp)
     with open(os.path.join(outdir, "profiles.tsv"), "w") as fh:
-        fh.write("# site pattern: one symbol per reference (" + ",".join(rnames) +
-                 "); M=matches polyploid, .=uncovered, a/b/c=distinct other alleles\n")
-        fh.write("pattern\t" + "\t".join(f"freq_{l}" for l in labels) + "\t" +
-                 "\t".join(f"count_{l}" for l in labels) + "\n")
-        order = np.argsort(-fit["counts"].sum(axis=0))
-        for j in order:
-            fh.write(pattern_names[j] + "\t" + "\t".join(f"{p[k, j]:.5f}" for k in range(len(labels))) + "\t" +
-                     "\t".join(f"{int(fit['counts'][k, j])}" for k in range(len(labels))) + "\n")
+        fh.write("# diagnostic-site patterns (used to place breakpoints): one symbol per reference ("
+                 + ",".join(rnames) + "); M=matches polyploid, .=uncovered, a/b=distinct other alleles\n")
+        fh.write("pattern\t" + "\t".join(f"freq_{l}" for l in labels) + "\n")
+        for j in np.argsort(-p.max(axis=0)):
+            fh.write(pattern_names[j] + "\t" + "\t".join(f"{p[k, j]:.5f}" for k in range(S)) + "\n")
     with open(os.path.join(outdir, "resolution.tsv"), "w") as fh:
-        fh.write("recipient\tdonor\tkl_per_site\tsites_per_kb\tllr_per_kb\tllr_needed\tmin_he_bp\t"
-                 "median_chrom_bp\tresolvable\n")
+        fh.write("recipient\tdonor\tllr_per_window\twindow_bp\tllr_needed\tmin_he_bp\tmedian_chrom_bp\tresolvable\n")
         for r in res:
-            fh.write(f"{labels[r['recipient']]}\t{labels[r['donor']]}\t{r['kl_per_site']:.4f}\t"
-                     f"{r['sites_per_kb']:.3f}\t{r['llr_per_kb']:.4f}\t{r['llr_needed']:.2f}\t"
-                     f"{_f(r['min_he_bp'], 6)}\t{r['median_chrom_bp']:.0f}\t{'yes' if r['resolvable'] else 'no'}\n")
+            fh.write(f"{labels[r['recipient']]}\t{labels[r['donor']]}\t{r['llr_per_window']:.3f}\t"
+                     f"{r['window_bp']:.0f}\t{r['llr_needed']:.2f}\t{_f(r['min_he_bp'], 6)}\t"
+                     f"{r['median_chrom_bp']:.0f}\t{'yes' if r['resolvable'] else 'no'}\n")
         fh.write(f"# breakpoint rate (per bp, EM): {fit['rho']:.4g}\n")
-    # bins.tsv.gz: 10-kb windows
-    W = PR.WINDOW_BP
-    with gzip.open(os.path.join(outdir, "bins.tsv.gz"), "wt", compresslevel=3) as fh:
-        fh.write("chrom\tstart\tend\tn_sites\tcov_2refs\t" +
-                 "\t".join(f"cov_{n}\tident_{n}" for n in rnames) + "\t" +
-                 "\t".join(f"ss_cov_{l}\tss_ident_{l}" for l in labels) + "\t" +
-                 "\t".join(f"post_{l}" for l in labels) + "\n")
-        for c, binned, post in zip(chroms, fit["binned"], fit["post"]):
-            d = data[c["name"]]
-            nw = d["nsite"].size
-            S = len(labels)
-            psum = np.zeros((nw, S))
-            pn = np.zeros(nw)
-            if binned["bins"].size:
-                wi = (binned["bins"] * PR.BIN_BP) // W
-                np.add.at(psum, wi, post)
-                np.add.at(pn, wi, 1)
-            for w in range(nw):
-                a, b = w * W, min((w + 1) * W, c["length"])
-                cells = [c["name"], str(a), str(b), str(d["nsite"][w]), str(d["cov2"][w])]
+    with gzip.open(os.path.join(outdir, "windows.tsv.gz"), "wt", compresslevel=3) as fh:
+        dim = wins[0]["X"].shape[1] if wins else 0
+        fh.write("chrom\tstart\tend\t" + "\t".join(f"compared_{n}\tdiv_{n}" for n in rnames) + "\t"
+                 + "\t".join(f"origin_axis{j + 1}" for j in range(dim)) + "\t"
+                 + "\t".join(f"post_{l}" for l in labels) + "\tcalled\n")
+        for w, post in zip(wins, fit["post"]):
+            for i in range(w["start"].size):
+                cells = [w["name"], str(int(w["start"][i])), str(int(w["end"][i]))]
                 for k in range(len(rnames)):
-                    cv, mm = d["cov"][k, w], d["mm"][k, w]
-                    cells += [str(cv), f"{1 - mm / cv:.4f}" if cv else "."]
-                for k in range(S):
-                    cv, mm = d["ss_cov"][k, w], d["ss_mm"][k, w]
-                    cells += [str(cv), f"{1 - mm / cv:.4f}" if cv else "."]
-                cells += [f"{psum[w, k] / pn[w]:.3f}" if pn[w] else "." for k in range(S)]
+                    cv, mm = int(w["cov"][i, k]), int(w["mm"][i, k])
+                    cells += [str(cv), f"{mm / cv:.5f}" if cv else "."]
+                cells += [f"{x:.4f}" for x in w["X"][i]]
+                cells += [f"{x:.4f}" for x in post[i]]
+                cells.append(labels[int(post[i].argmax())])
                 fh.write("\t".join(cells) + "\n")

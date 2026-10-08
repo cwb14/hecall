@@ -3,85 +3,75 @@ import os
 
 import numpy as np
 
-from . import extract, model, sites
+from . import extract, model
 from . import params as PR
 
 
 # ----------------------------------------------------------------------------- helpers
 def project(aln, a, b):
-    """Project query interval [a,b) through alignments; returns (target, t_lo, t_hi, overlap_bp)
-    for the target with the largest overlap, or None."""
+    """Project query interval [a,b) through alignments, robustly.
+
+    Returns dict(target, lo, hi, t_med, q_med, bp) for the target chromosome holding most aligned
+    bases, with lo/hi = 5th/95th and t_med = 50th aligned-base-weighted percentile of target
+    positions (stray repeat alignments elsewhere on the target do not stretch the interval), or None."""
     if aln is None:
         return None
     sel = np.flatnonzero((aln["qs"] < b) & (aln["qe"] > a))
     if sel.size == 0:
         return None
-    best = {}
-    for i in sel:
-        x0, x1 = max(a, aln["qs"][i]), min(b, aln["qe"][i])
-        if aln["fwd"][i]:
-            t0, t1 = aln["ts"][i] + (x0 - aln["qs"][i]), aln["ts"][i] + (x1 - aln["qs"][i])
-        else:
-            t0, t1 = aln["te"][i] - (x1 - aln["qs"][i]), aln["te"][i] - (x0 - aln["qs"][i])
-        t = aln["t"][i]
-        o = best.setdefault(t, [0, np.inf, -np.inf])
-        o[0] += x1 - x0
-        o[1] = min(o[1], t0)
-        o[2] = max(o[2], t1)
-    t, (ov, lo, hi) = max(best.items(), key=lambda kv: kv[1][0])
-    return t, int(lo), int(hi), int(ov)
+    x0 = np.maximum(a, aln["qs"][sel])
+    x1 = np.minimum(b, aln["qe"][sel])
+    fwd = aln["fwd"][sel]
+    t0 = np.where(fwd, aln["ts"][sel] + (x0 - aln["qs"][sel]), aln["te"][sel] - (x1 - aln["qs"][sel]))
+    t1 = np.where(fwd, aln["ts"][sel] + (x1 - aln["qs"][sel]), aln["te"][sel] - (x0 - aln["qs"][sel]))
+    w = (x1 - x0).astype(float)
+    tg = aln["t"][sel]
+    tot = {}
+    for t, ww in zip(tg, w):
+        tot[t] = tot.get(t, 0.0) + ww
+    best = max(tot, key=tot.get)
+    m = tg == best
+    lo_, hi_, wm = np.minimum(t0, t1)[m].astype(float), np.maximum(t0, t1)[m].astype(float), w[m]
+    qm = ((x0 + x1) / 2.0)[m]
+
+    def pct(q):
+        """Target position below which a fraction q of aligned bases lies (uniform within pieces)."""
+        lo, hi = lo_.min(), hi_.max()
+        goal = q * wm.sum()
+        for _ in range(60):
+            x = (lo + hi) / 2
+            f = (wm * np.clip((x - lo_) / np.maximum(hi_ - lo_, 1.0), 0, 1)).sum()
+            lo, hi = (x, hi) if f < goal else (lo, x)
+        return (lo + hi) / 2
+
+    return {"target": best, "lo": int(pct(0.05)), "hi": int(pct(0.95)), "t_med": pct(0.5),
+            "q_med": float(np.average(qm, weights=wm)), "bp": int(wm.sum())}
 
 
-def flank_point(aln, a, b, side):
-    """Target (chrom, pos, query pos) just outside [a,b): through the alignment reaching closest to
-    a from the left (side='L') or to b from the right ('R'). An alignment spanning the boundary
-    counts (it then vouches for collinearity on its own)."""
-    if aln is None:
-        return None
-    if side == "L":
-        sel = np.flatnonzero(aln["qs"] < a)
-        if sel.size == 0:
-            return None
-        reach = np.minimum(aln["qe"][sel], a)
-        i = sel[np.argmax(reach)]
-        q = int(min(aln["qe"][i], a)) - 1
-    else:
-        sel = np.flatnonzero(aln["qe"] > b)
-        if sel.size == 0:
-            return None
-        reach = np.maximum(aln["qs"][sel], b)
-        i = sel[np.argmin(reach)]
-        q = int(max(aln["qs"][i], b))
-    t = aln["ts"][i] + (q - aln["qs"][i]) if aln["fwd"][i] else aln["te"][i] - (q - aln["qs"][i]) - 1
-    return aln["t"][i], int(t), int(q)
+def syntenic(aln, a, b, block_a, block_b):
+    """Is the reference sequence matching [a,b) collinear with the sequence matching the native
+    flanks of the non-native block [block_a, block_b) that contains it?
 
-
-def syntenic(aln, a, b):
-    """Is the reference alignment covering [a,b) collinear with its flanks? True/False/None."""
-    pr = project(aln, a, b)
-    if pr is None:
+    Flanks: max(block length, SYNTENY_FLANK_MIN_BP) (capped at SYNTENY_FLANK_MAX_BP) on each side of
+    the block. True if collinear with at least one flank (a rearrangement between assemblies can
+    sit on one side); False if no flank agrees (transposed repeat, translocation, misassembly);
+    None if no flank aligns. Also returns the segment's core target interval."""
+    seg = project(aln, a, b)
+    if seg is None:
         return None, None
-    t, lo, hi, _ = pr
-    mid_q, mid_t = (a + b) // 2, (lo + hi) // 2
+    F = min(max(block_b - block_a, PR.SYNTENY_FLANK_MIN_BP), PR.SYNTENY_FLANK_MAX_BP)
     verdicts = []
-    for side in ("L", "R"):
-        fp = flank_point(aln, a, b, side)
-        if fp is None or abs(fp[2] - mid_q) > PR.SYNTENY_FLANK_MAX_BP:
+    for fa, fb in ((max(0, block_a - F), block_a), (block_b, block_b + F)):
+        if fb <= fa:
             continue
-        ft, fpos, fq = fp
-        ok = ft == t and abs(fpos - mid_t) <= PR.SYNTENY_SLACK_BP + PR.SYNTENY_FOLD * abs(fq - mid_q)
-        verdicts.append(ok)
-    target = f"{t}:{lo}-{hi}"
-    if not verdicts:
-        return None, target
-    return all(verdicts), target
-
-
-def window_rate(num, den, a, b):
-    W = PR.WINDOW_BP
-    w0, w1 = a // W, max(a // W + 1, (b + W - 1) // W)
-    n, d = num[..., w0:w1].sum(axis=-1), den[..., w0:w1].sum(axis=-1)
-    return n, d
+        fl = project(aln, fa, fb)
+        if fl is None:
+            continue
+        dq = abs(seg["q_med"] - fl["q_med"])
+        verdicts.append(fl["target"] == seg["target"] and
+                        abs(seg["t_med"] - fl["t_med"]) <= PR.SYNTENY_SLACK_BP + PR.SYNTENY_FOLD * dq)
+    target = f"{seg['target']}:{seg['lo']}-{seg['hi']}"
+    return (any(verdicts) if verdicts else None), target
 
 
 def code_stats(work, source, chrom, a, b):
@@ -93,29 +83,17 @@ def code_stats(work, source, chrom, a, b):
     return int(((c >= 1) & (c <= 5)).sum()), int(((c >= 2) & (c <= 5)).sum())
 
 
-def pattern_names(allkeys, remap, n_pat, K):
-    names = [[] for _ in range(n_pat)]
-    for k, r in zip(allkeys, remap):
-        names[r].append(sites.key_to_pattern(int(k), K))
-    return ["|".join(n) if len(n) == 1 else f"rare({len(n)})" for n in names]
-
-
 # ----------------------------------------------------------------------------- main
-def make_calls(mchroms, chroms, labels, fit, res, data, gaps, work, ref_sources, log):
+def make_calls(mchroms, chroms, labels, fit, wins, res, slogp, data, gaps, work, ref_sources, log):
     S = len(labels)
-    logp = fit["logp"]
     resolvable = {(r["recipient"], r["donor"]): r["resolvable"] for r in res}
     segs = {}
-    for m, c, binned, post in zip(mchroms, chroms, fit["binned"], fit["post"]):
-        sg = model.segments(m, binned, post, logp)
-        L = c["length"]
-        for i, s in enumerate(sg):
-            s["tile_start"] = 0 if i == 0 else (s["bp_left"][0] + s["bp_left"][1]) // 2
-            s["tile_end"] = L if i == len(sg) - 1 else (s["bp_right"][0] + s["bp_right"][1]) // 2
-            s["qual"] = model.qual(s["post_mean"])
+    for m, c, w, post, binned in zip(mchroms, chroms, wins, fit["post"], fit["binned"]):
+        sg = model.segments(m, w, post, binned, slogp)
         if not sg:
+            L = c["length"]
             sg = [{"state": c["label_idx"], "tile_start": 0, "tile_end": L, "qual": 0.0, "post_mean": 0.0,
-                   "nosites": True, "site_a": 0, "site_b": 0, "start": None, "end": None,
+                   "nosites": True, "site_a": 0, "site_b": 0, "llr": 0.0, "win_a": 0, "win_b": 0,
                    "bp_left": (0, 0, 0, 0), "bp_right": (L, L, L, L),
                    "terminal_left": True, "terminal_right": True}]
         segs[c["name"]] = sg
@@ -125,45 +103,44 @@ def make_calls(mchroms, chroms, labels, fit, res, data, gaps, work, ref_sources,
     ss_aln = {lab: extract.load_aln(work, f"ss_{lab}") for lab in labels}
     name2chrom = {c["name"]: c for c in chroms}
 
-    # genome-wide homoeologue divergence baseline per (label, other label): native windows only
+    # genome-wide homoeologue divergence per (label, other label)
     base = {}
     for s_i in range(S):
         for t_i in range(S):
-            if s_i == t_i:
-                continue
-            num = den = 0
-            for c in chroms:
-                if c["label_idx"] != s_i:
-                    continue
-                d = data[c["name"]]
-                num += int(d["ss_mm"][t_i].sum())
-                den += int(d["ss_cov"][t_i].sum())
-            base[(s_i, t_i)] = num / den if den else float("nan")
+            if s_i != t_i:
+                num = sum(int(data[c["name"]]["ss_mm"][t_i].sum()) for c in chroms if c["label_idx"] == s_i)
+                den = sum(int(data[c["name"]]["ss_cov"][t_i].sum()) for c in chroms if c["label_idx"] == s_i)
+                base[(s_i, t_i)] = num / den if den else float("nan")
 
     he = []
     for m, c in zip(mchroms, chroms):
         s_i = c["label_idx"]
-        d = data[c["name"]]
-        pos, pid = m["site_pos"], m["site_pid"]
-        for seg in segs[c["name"]]:
+        pid = m["site_pid"]
+        # contiguous blocks of non-native segments (any donor): their native flanks vouch for synteny
+        block, run = {}, []
+        for k, seg in enumerate(segs[c["name"]] + [None]):
+            if seg is not None and seg["state"] != s_i and not seg.get("nosites"):
+                run.append(k)
+                continue
+            for j in run:
+                block[j] = (segs[c["name"]][run[0]]["tile_start"], segs[c["name"]][run[-1]]["tile_end"])
+            run = []
+        for k, seg in enumerate(segs[c["name"]]):
             t_i = seg["state"]
             if t_i == s_i or seg.get("nosites"):
                 continue
             a, b = seg["tile_start"], seg["tile_end"]
             sa, sb = seg["site_a"], seg["site_b"]
-            lr = logp[t_i][pid[sa:sb]] - logp[s_i][pid[sa:sb]]
-            # closest reference inside the segment (lowest SNV divergence)
+            lr = slogp[t_i][pid[sa:sb]] - slogp[s_i][pid[sa:sb]]
             st = [code_stats(work, src, c["name"], a, b) for src in ref_sources]
             div = np.array([mm / cv if cv else np.inf for cv, mm in st])
             best = int(np.argmin(div))
-            syn, tgt = syntenic(ref_aln[ref_sources[best]].get(c["name"]), a, b)
-            # homoeologue
+            syn, tgt = syntenic(ref_aln[ref_sources[best]].get(c["name"]), a, b, block[k][0], block[k][1])
             pr = project(ss_aln[labels[t_i]].get(c["name"]), a, b)
             hom_type, hom_loc, frac_s = "unpaired", "", float("nan")
             ssc, ssm = code_stats(work, f"ss_{labels[t_i]}", c["name"], a, b)
-            ss_cov_frac = ssc / max(b - a, 1)
-            if pr is not None and pr[3] >= PR.HOMOEOLOG_MIN_COVER * (b - a):
-                y, ylo, yhi, _ = pr
+            if pr is not None and pr["bp"] >= PR.HOMOEOLOG_MIN_COVER * (b - a):
+                y, ylo, yhi = pr["target"], pr["lo"], pr["hi"]
                 hom_loc = f"{y}:{ylo}-{yhi}"
                 ysegs = segs.get(y)
                 if ysegs is not None and name2chrom[y]["label_idx"] == t_i:
@@ -175,16 +152,13 @@ def make_calls(mchroms, chroms, labels, fit, res, data, gaps, work, ref_sources,
                                 bp_s += ov
                             elif ys["state"] == t_i:
                                 bp_t += ov
-                    tot = bp_s + bp_t
-                    if tot:
-                        frac_s = bp_s / tot
+                    if bp_s + bp_t:
+                        frac_s = bp_s / (bp_s + bp_t)
                         hom_type = "reciprocal" if frac_s >= 0.5 else "non-reciprocal"
-            # flags
             flags = []
-            for key in ("bp_left", "bp_right"):
+            for key, term in (("bp_left", "terminal_left"), ("bp_right", "terminal_right")):
                 lo, hi = seg[key][2], seg[key][3]
-                if any(g0 < hi and g1 > lo for g0, g1 in gaps.get(c["name"], [])) and \
-                        not seg["terminal_" + key.split("_")[1]]:
+                if not seg[term] and any(g0 < hi and g1 > lo for g0, g1 in gaps.get(c["name"], [])):
                     flags.append("gap_at_breakpoint")
                     break
             if seg["terminal_left"] or seg["terminal_right"]:
@@ -198,44 +172,43 @@ def make_calls(mchroms, chroms, labels, fit, res, data, gaps, work, ref_sources,
                 filt.append("nonsyntenic")
             he.append({
                 "chrom": c["name"], "label": labels[s_i], "donor": labels[t_i],
-                "start": a, "end": b, "length": b - a,
-                "core_start": seg["start"], "core_end": seg["end"],
+                "start": a, "end": b, "length": b - a, "n_windows": seg["win_b"] - seg["win_a"],
                 "bp_left_ci": "terminal" if seg["terminal_left"] else f"{seg['bp_left'][2]}-{seg['bp_left'][3]}",
                 "bp_right_ci": "terminal" if seg["terminal_right"] else f"{seg['bp_right'][2]}-{seg['bp_right'][3]}",
-                "qual": round(seg["qual"], 1), "post_mean": seg["post_mean"],
-                "llr": float(lr.sum()), "n_sites": int(sb - sa), "n_support": int((lr > 0).sum()),
-                "n_against": int((lr < 0).sum()),
+                "qual": round(seg["qual"], 1), "post_mean": seg["post_mean"], "llr": seg["llr"],
+                "n_sites": int(sb - sa), "n_support": int((lr > 0).sum()), "n_against": int((lr < 0).sum()),
                 "closest_ref": best, "ref_div": [float(x) for x in div],
                 "syntenic": syn, "ref_target": tgt or "",
                 "homoeolog": hom_loc, "type": hom_type, "homoeolog_frac_recipient_origin": frac_s,
-                "ss_div": float(ssm / ssc) if ssc else float("nan"), "ss_cover": float(ss_cov_frac),
+                "ss_div": float(ssm / ssc) if ssc else float("nan"), "ss_cover": float(ssc / max(b - a, 1)),
                 "ss_div_baseline": base[(s_i, t_i)],
                 "flags": ",".join(flags) or ".", "filter": ";".join(filt) or "PASS"})
     return segs, he
 
 
-def nocall_regions(mchroms, chroms, data, res, refs):
-    """Stretches without informative sites longer than the shortest detectable HE."""
-    lmin = min((r["min_he_bp"] for r in res), default=float("inf"))
-    lmin = max(lmin, PR.BIN_BP)
+def nocall_regions(chroms, wins, data, refs, min_len):
+    """Stretches covered by no window (too sparsely aligned) at least one typical window long."""
     out = {}
-    W = PR.WINDOW_BP
-    for m, c in zip(mchroms, chroms):
+    B = PR.BIN_BP
+    for c, w in zip(chroms, wins):
         L = c["length"]
-        p = m["site_pos"]
-        edges = np.concatenate([[0], p, [L]])
-        gl = np.diff(edges)
-        idx = np.flatnonzero(gl > lmin)
-        d = data[c["name"]]
+        edges_s = np.concatenate([w["end"], [L]]) if w["start"].size else np.array([L])
+        edges_a = np.concatenate([[0], w["end"]]) if w["start"].size else np.array([0])
+        starts = np.concatenate([w["start"], [L]]) if w["start"].size else np.array([L])
         regs = []
-        for i in idx:
-            a = int(edges[i]) + (1 if i > 0 else 0)
-            b = int(edges[i + 1])
-            w0, w1 = a // W, max(a // W + 1, (b + W - 1) // W)
-            span = (w1 - w0) * W
-            f2 = d["cov2"][w0:w1].sum() / span
-            f1 = d["cov"][:, w0:w1].sum(axis=1).max() / span
-            reason = "no_differences" if f2 >= 0.5 else ("one_reference" if f1 >= 0.5 else "no_alignment")
+        d = data[c["name"]]
+        for a, b in zip(edges_a, starts):
+            a, b = int(a), int(b)
+            if b - a < min_len:
+                continue
+            b0, b1 = a // B, max(a // B + 1, (b + B - 1) // B)
+            span = (b1 - b0) * B
+            frac = d["cov"][:, b0:b1].sum(axis=1) / span
+            if frac.max() < 0.05:
+                reason = "no_alignment"
+            else:
+                weak = [refs[k][0] for k in np.flatnonzero(frac < 0.5 * frac.max())]
+                reason = "sparse_alignment" + (f"({','.join(weak)})" if weak else "")
             regs.append((a, b, reason))
         out[c["name"]] = regs
     return out
@@ -250,11 +223,9 @@ def chromosome_summary(chroms, labels, segs, he, nocall):
             if not s.get("nosites"):
                 bp[s["state"]] += s["tile_end"] - s["tile_start"]
         nc = sum(b - a for a, b, _ in nocall[c["name"]])
-        ev = bp.sum()
-        maj = labels[int(np.argmax(bp))] if ev else "."
+        maj = labels[int(np.argmax(bp))] if bp.sum() else "."
         hp = [h for h in he if h["chrom"] == c["name"] and h["filter"] == "PASS"]
-        rows.append({"chrom": c["name"], "label": c["label"], "length": L,
-                     "majority_origin": maj,
+        rows.append({"chrom": c["name"], "label": c["label"], "length": L, "majority_origin": maj,
                      **{f"pct_{lab}": round(100 * bp[i] / L, 2) for i, lab in enumerate(labels)},
                      "pct_nocall": round(100 * nc / L, 2),
                      "n_he_pass": len(hp), "he_bp_pass": sum(h["length"] for h in hp),
