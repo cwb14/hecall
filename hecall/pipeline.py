@@ -179,10 +179,7 @@ def run(subgenome_args, ref_args, outdir, threads=8, verbose=False, keep_work=Tr
 
     # ---- model
     fit = model.run(wins, S, verbose=lambda m: log(m, detail=True))
-    res = model.resolution(fit, wins, S)
-    log(f"model: breakpoint rate {fit['rho']:.3g}/bp; "
-        + "; ".join(f"{labels[r['donor']]}->{labels[r['recipient']]} min HE {output.fmt_bp(r['min_he_bp'])}"
-                    + ("" if r["resolvable"] else " (unresolvable)") for r in res))
+    log(f"model: segmentation breakpoint rate {fit['rho']:.3g}/bp")
     allkeys = np.unique(np.concatenate([d["key"] for d in data.values()]))
     mchroms = []
     for c, w, a in zip(chroms, wins, fit["assign"]):
@@ -198,7 +195,10 @@ def run(subgenome_args, ref_args, outdir, threads=8, verbose=False, keep_work=Tr
     log(f"sites: {sum(m['site_pos'].size for m in mchroms):,} diagnostic sites place breakpoints")
 
     # ---- calls
-    segs, he = calls.make_calls(mchroms, chroms, labels, fit, wins, res, slogp, data, gaps, work, ref_sources, log)
+    segs, he, res, rho_c = calls.make_calls(mchroms, chroms, labels, fit, wins, slogp, data, gaps, work, ref_sources, log)
+    fit["rho_cal"] = rho_c
+    log("model: " + "; ".join(f"{labels[r['donor']]}->{labels[r['recipient']]} min HE {output.fmt_bp(r['min_he_bp'])}"
+                             + ("" if r["resolvable"] else " (unresolvable)") for r in res))
     nocall = calls.nocall_regions(chroms, wins, data, refs, np.median(span0) * PR.BIN_BP)
     chrom_rows = calls.chromosome_summary(chroms, labels, segs, he, nocall)
 

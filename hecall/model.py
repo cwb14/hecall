@@ -155,9 +155,42 @@ def fit_hmm(binned, labels, S, rho=PR.RHO_INIT, verbose=None):
     return post, rho, pi, logL
 
 
+def autocorrelation(series, max_lag=PR.TAU_MAX_LAG):
+    """Autocorrelation of window evidence at lags 0..max_lag, pooled over chromosomes, truncated
+    where Geyer's initial positive sequence ends (first non-positive sum of a lag pair -> 0)."""
+    num = np.zeros(max_lag + 1)
+    den = 0.0
+    for x in series:
+        if x.size < 3:
+            continue
+        x = x - x.mean()
+        m = 1 << int(np.ceil(np.log2(2 * x.size)))
+        f = np.fft.rfft(x, m)
+        ac = np.fft.irfft(f * np.conj(f), m)[:min(max_lag, x.size - 1) + 1]
+        num[:ac.size] += ac
+        den += ac[0]
+    rho = num / den if den > 0 else np.zeros(max_lag + 1)
+    rho[0] = 1.0
+    k = 1
+    while k + 1 <= max_lag and rho[k] + rho[k + 1] > 0:
+        k += 2
+    rho[k:] = 0.0
+    return rho
+
+
+def tau_n(rho, n):
+    """Variance inflation of a sum of n consecutive correlated window evidences:
+    1 + 2 * sum_{k=1}^{n-1} (1 - k/n) rho_k (composite-likelihood / effective-sample-size factor)."""
+    n = int(max(n, 1))
+    k = np.arange(1, min(n, rho.size))
+    return max(1.0, 1.0 + 2.0 * float(((1.0 - k / n) * rho[k]).sum()))
+
+
 def run(wins, S, verbose=None):
     """wins: per chromosome dict(label, X (n, d) features, d (n,) distances). Rounds: fit KDEs on
-    windows assigned to each state (start: chromosome labels) -> HMM -> reassign -> repeat."""
+    windows assigned to each state (start: chromosome labels) -> HMM -> reassign -> repeat.
+    The HMM proposes segments; their evidence is calibrated for serial correlation afterwards
+    (calls.py), using the autocorrelation of window evidence in native windows returned here."""
     labels = np.array([w["label"] for w in wins], dtype=np.int64)
     Xall = np.vstack([w["X"] for w in wins if w["X"].shape[0]])
     lo = np.quantile(Xall, PR.KDE_RANGE_Q, axis=0) - PR.KDE_PAD
@@ -167,8 +200,16 @@ def run(wins, S, verbose=None):
     for r in range(PR.PROFILE_ROUNDS + 1):
         A = np.concatenate(assign)
         kdes = [KDE(Xall[A == s], lo, hi) for s in range(S)]
-        binned = [{"E": np.column_stack([k.logpdf(w["X"]) for k in kdes]) if w["X"].shape[0]
-                   else np.zeros((0, S)), "d": w["d"]} for w in wins]
+        raw = [np.column_stack([k.logpdf(w["X"]) for k in kdes]) if w["X"].shape[0] else np.zeros((0, S))
+               for w in wins]
+        series = []
+        for E, w, a in zip(raw, wins, assign):
+            if E.shape[0]:
+                own = E[np.arange(E.shape[0]), a]
+                other = np.where(np.eye(S, dtype=bool)[a], -np.inf, E).max(axis=1)
+                series.append((other - own)[a == w["label"]])
+        rho_ac = autocorrelation(series)
+        binned = [{"E": E, "d": w["d"]} for E, w in zip(raw, wins)]
         post, rho, pi, logL = fit_hmm(binned, labels, S, rho, verbose)
         assign = [g.argmax(axis=1) if g.size else np.zeros(0, dtype=np.int64) for g in post]
         cur = np.concatenate(assign)
@@ -179,7 +220,7 @@ def run(wins, S, verbose=None):
             break
         prev = cur
     return {"kdes": kdes, "lo": lo, "hi": hi, "binned": binned, "post": post, "rho": rho, "pi": pi,
-            "logL": logL, "assign": assign}
+            "logL": logL, "assign": assign, "rho_ac": rho_ac}
 
 
 # ----------------------------------------------------------------------------- site profiles (breakpoints only)
@@ -269,10 +310,10 @@ def qual(post_mean):
 
 
 # ----------------------------------------------------------------------------- resolution
-def resolution(fit, wins, S):
-    """Per ordered pair (recipient s, donor t): expected LLR per window of donor sequence (mean
-    over t's own windows of log f_t - log f_s), typical window span on s, and the shortest HE
-    reaching QUAL 20 against two switches at the fitted rate."""
+def resolution(fit, wins, S, rho, rho_ac):
+    """Per ordered pair (recipient s, donor t): expected evidence per window of donor sequence (mean
+    over t's own windows of log f_t - log f_s), typical window span on s, and the shortest HE whose
+    serially-calibrated evidence (n * kl / tau_n) beats two breakpoints at rate rho by QUAL 20."""
     E = np.vstack([b["E"] for b in fit["binned"] if b["E"].shape[0]])
     A = np.concatenate(fit["assign"])
     out = []
@@ -281,14 +322,22 @@ def resolution(fit, wins, S):
         spans = [w["end"] - w["start"] for w in ws if w["end"].size]
         span = float(np.median(np.concatenate(spans))) if spans else float("nan")
         med_len = float(np.median([w["length"] for w in ws])) if ws else 0.0
+        nmax = int(med_len / span) if span > 0 else 0
         for t in range(S):
             if t == s:
                 continue
             sel = A == t
             kl = float((E[sel, t] - E[sel, s]).mean()) if sel.any() else 0.0
-            need = math.log(99) + 2 * math.log(1.0 / (fit["rho"] * span)) if span > 0 else float("inf")
-            lstar = math.ceil(need / kl) * span if kl > 0 else float("inf")
+            prior = 2 * math.log(rho * span / (S - 1)) if span > 0 else -float("inf")
+            lstar = float("inf")
+            if kl > 0:
+                n = 1
+                while n <= nmax:
+                    if n * kl / tau_n(rho_ac, n) + prior >= math.log(99):
+                        lstar = n * span
+                        break
+                    n = n + 1 if n < 50 else int(n * 1.05) + 1
             out.append({"recipient": s, "donor": t, "llr_per_window": kl, "window_bp": span,
-                        "llr_needed": need, "min_he_bp": lstar, "median_chrom_bp": med_len,
-                        "resolvable": lstar <= med_len})
+                        "tau_at_min": tau_n(rho_ac, int(lstar / span)) if math.isfinite(lstar) else float("nan"),
+                        "min_he_bp": lstar, "median_chrom_bp": med_len, "resolvable": math.isfinite(lstar)})
     return out

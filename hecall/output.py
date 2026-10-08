@@ -33,8 +33,8 @@ def write_all(outdir, labels, refs, chroms, segs, he, nocall, chrom_rows, fit, w
               pattern_names, data):
     rnames = [r[0] for r in refs]
     S = len(labels)
-    cols = ["chrom", "start", "end", "length", "label", "donor", "qual", "filter", "type", "llr",
-            "n_windows", "n_sites", "n_support", "n_against", "bp_left_ci", "bp_right_ci",
+    cols = ["chrom", "start", "end", "length", "label", "donor", "qual", "filter", "type", "llr", "tau_n",
+            "p_identity", "log_odds", "n_windows", "n_sites", "n_support", "n_against", "bp_left_ci", "bp_right_ci",
             "syntenic", "closest_ref", "ref_target"] + [f"div_{n}" for n in rnames] + \
            ["homoeolog", "homoeolog_frac_recipient_origin", "ss_div", "ss_div_baseline", "ss_cover", "flags"]
     with open(os.path.join(outdir, "he.tsv"), "w") as fh:
@@ -78,12 +78,14 @@ def write_all(outdir, labels, refs, chroms, segs, he, nocall, chrom_rows, fit, w
         for j in np.argsort(-p.max(axis=0)):
             fh.write(pattern_names[j] + "\t" + "\t".join(f"{p[k, j]:.5f}" for k in range(S)) + "\n")
     with open(os.path.join(outdir, "resolution.tsv"), "w") as fh:
-        fh.write("recipient\tdonor\tllr_per_window\twindow_bp\tllr_needed\tmin_he_bp\tmedian_chrom_bp\tresolvable\n")
+        fh.write("recipient\tdonor\tllr_per_window\twindow_bp\ttau_at_min\tmin_he_bp\tmedian_chrom_bp\tresolvable\n")
         for r in res:
             fh.write(f"{labels[r['recipient']]}\t{labels[r['donor']]}\t{r['llr_per_window']:.3f}\t"
-                     f"{r['window_bp']:.0f}\t{r['llr_needed']:.2f}\t{_f(r['min_he_bp'], 6)}\t"
+                     f"{r['window_bp']:.0f}\t{_f(r['tau_at_min'])}\t{_f(r['min_he_bp'], 6)}\t"
                      f"{r['median_chrom_bp']:.0f}\t{'yes' if r['resolvable'] else 'no'}\n")
-        fh.write(f"# breakpoint rate (per bp, EM): {fit['rho']:.4g}\n")
+        fh.write(f"# breakpoint rate (per bp): segmentation HMM {fit['rho']:.4g}; calibrated prior {fit['rho_cal']:.4g}\n")
+        fh.write("# serial correlation of window evidence (native windows), lag: rho = "
+                 + ", ".join(f"{k}:{fit['rho_ac'][k]:.2f}" for k in (1, 2, 5, 10, 20, 50, 100) if k < fit['rho_ac'].size) + "\n")
     with gzip.open(os.path.join(outdir, "windows.tsv.gz"), "wt", compresslevel=3) as fh:
         dim = wins[0]["X"].shape[1] if wins else 0
         fh.write("chrom\tstart\tend\t" + "\t".join(f"compared_{n}\tdiv_{n}" for n in rnames) + "\t"

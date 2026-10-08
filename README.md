@@ -25,14 +25,17 @@ hecall also says where it cannot tell.
 ## How it works (one paragraph)
 
 Every reference genome is aligned to the polyploid with FastGA, keeping only syntenic chains
-(ALNchain). At each polyploid base that two or more references cover, hecall records which
-references carry the same base, e.g. "matches the first reference only". The frequencies of these
-patterns are learned on each subgenome of the polyploid itself. "What B-donor sequence looks like"
-is therefore measured on the polyploid's own B subgenome. This is why stand-in or distant
-references still work: what matters is that the references *tell the donors apart*, not that they
-*are* the donors. A hidden Markov model walks along each chromosome and assigns every stretch to
-the donor whose pattern it matches. The breakpoint rate is estimated from the data. Where the
-origin differs from the chromosome's subgenome, that stretch is an HE.
+(ALNchain). Along each polyploid chromosome, hecall builds windows that each hold the same
+information: enough compared bases for ~10 mismatches to the closest reference. In each window it
+measures how much closer the polyploid is to one reference than to another. How these
+measurements are spread for "A-donor" and "B-donor" sequence is learned from the polyploid's own A
+and B subgenomes. Native quirks (incomplete lineage sorting, divergent reference haplotypes,
+hard-to-align regions) are therefore part of what is expected, not evidence of exchange. A hidden
+Markov model proposes stretches whose origin differs from their chromosome's subgenome. Their
+breakpoints are then placed between single diagnostic bases. Each candidate's evidence is
+discounted for the correlation between neighbouring windows that native sequence shows, before it
+gets a quality score. The polyploid's own homoeologue gives an independent check: a swapped piece
+(reciprocal), or two near-identical copies (non-reciprocal).
 
 ## Run
 
@@ -52,14 +55,15 @@ Reruns resume from checkpoints in `out/work/`.
 | `segments.bed` | full origin painting of every chromosome |
 | `nocall.bed` | regions where an HE could not have been detected, and why |
 | `chromosomes.tsv` | per chromosome: % of each origin, % not evaluable, number of HEs, label conflicts |
-| `resolution.tsv` | per subgenome pair: information per site, sites per kb, **smallest detectable HE** |
-| `profiles.tsv` | the learned site-pattern profiles of each subgenome |
-| `bins.tsv.gz` | 10-kb windows: identity to every reference and homoeologue, sites, posterior |
+| `resolution.tsv` | per subgenome pair: evidence per window, window size, **smallest detectable HE**; serial correlation |
+| `profiles.tsv` | diagnostic-site pattern frequencies per subgenome (used to place breakpoints) |
+| `windows.tsv.gz` | every window: compared bases and divergence to each reference, origin axis, posterior |
 | `painting.pdf/.png` + `painting_legend.md` | chromosome painting with every PASS HE marked |
 
 ### Key columns of `he.tsv`
 
-- **`qual`**: Phred-scaled posterior that the segment has the called donor origin. 20 = 99%.
+- **`qual`**: Phred-scaled posterior that the segment has the called donor origin, after
+  discounting correlated windows (`llr / tau_n`) and a breakpoint prior. 20 = 99%.
 - **`filter`**:
   - `PASS`
   - `LowQual` (QUAL < 20)
@@ -70,7 +74,13 @@ Reruns resume from checkpoints in `out/work/`.
   - `reciprocal`: the homoeologue carries the swapped piece
   - `non-reciprocal`: both copies are from the donor; `ss_div` ≪ `ss_div_baseline` confirms it
   - `unpaired`: no alignable homoeologue
-- **`llr`, `n_sites`, `n_support`, `n_against`**: the raw evidence, independent of the HMM prior.
+- **`llr`, `tau_n`, `n_windows`**: summed window evidence, its serial-correlation discount, and the
+  number of windows.
+- **`n_sites`, `n_support`, `n_against`**: diagnostic sites inside the segment and how many favour
+  the donor.
+- **`p_identity`**: for non-reciprocal calls, the fraction of same-length genome blocks whose
+  homoeologues are at least as similar. Small values back a recent non-reciprocal exchange; the
+  value is conservative.
 - **`bp_left_ci`, `bp_right_ci`**: 95% credible interval of each breakpoint, or `terminal`.
 - **`flags`**:
   - `gap_at_breakpoint`: an assembly gap lies within a breakpoint interval (a possible misjoin)

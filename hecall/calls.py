@@ -3,7 +3,10 @@ import os
 
 import numpy as np
 
+import math
+
 from . import extract, model
+from .model import tau_n
 from . import params as PR
 
 
@@ -83,10 +86,61 @@ def code_stats(work, source, chrom, a, b):
     return int(((c >= 1) & (c <= 5)).sum()), int(((c >= 2) & (c <= 5)).sum())
 
 
+class IdentityNull:
+    """Matched-span reference for homoeologue identity: divergence between each subgenome-s
+    chromosome and its subgenome-t homoeologue over sliding blocks of the same span, genome-wide.
+    p_identity = fraction of such blocks at least as similar (conservative: includes true
+    conversion tracts)."""
+
+    def __init__(self, chroms, data):
+        self.chroms, self.data, self.cache = chroms, data, {}
+
+    def p(self, s_i, t_i, span_bp, d_obs, n_obs):
+        L = max(1, int(round(span_bp / PR.BIN_BP)))
+        L = 1 << int(round(math.log2(L)))            # spans pooled on a doubling grid
+        key = (s_i, t_i, L)
+        if key not in self.cache:
+            vals = []
+            for c in self.chroms:
+                if c["label_idx"] != s_i:
+                    continue
+                cv = np.concatenate([[0], np.cumsum(self.data[c["name"]]["ss_cov"][t_i], dtype=np.int64)])
+                mm = np.concatenate([[0], np.cumsum(self.data[c["name"]]["ss_mm"][t_i], dtype=np.int64)])
+                if cv.size <= L:
+                    continue
+                st = max(1, L // 2)
+                i = np.arange(0, cv.size - L, st)
+                c_, m_ = cv[i + L] - cv[i], mm[i + L] - mm[i]
+                ok = c_ >= PR.IDENTITY_MIN_COVER * L * PR.BIN_BP
+                vals.append(m_[ok] / c_[ok])
+            v = np.sort(np.concatenate(vals)) if vals else np.zeros(0)
+            self.cache[key] = v
+        v = self.cache[key]
+        if v.size == 0 or n_obs < PR.IDENTITY_MIN_COVER * span_bp:
+            return 1.0
+        return (1 + np.searchsorted(v, d_obs, side="right")) / (1 + v.size)
+
+
+def calibrate(he, rho, rho_ac, span, S):
+    """log posterior odds and QUAL of each candidate: serially calibrated origin evidence
+    (llr / tau_n) + breakpoint prior at rate rho. Homoeologue identity is reported (p_identity) but
+    not added: its genome-wide null contains the conversion tracts it would detect."""
+    for h in he:
+        n = h["n_windows"]
+        tn = tau_n(rho_ac, n)
+        nbp = int(h["bp_left_ci"] != "terminal") + int(h["bp_right_ci"] != "terminal")
+        prior = nbp * math.log(max(rho * span[h["label_idx"]] / (S - 1), 1e-300))
+        lo = h["llr"] / tn + prior
+        post = 1.0 / (1.0 + math.exp(-lo)) if lo > -700 else 0.0
+        h["tau_n"] = tn
+        h["log_odds"] = lo
+        h["qual"] = round(min(PR.QUAL_CAP, -10 * math.log10(max(1 - post, 10 ** (-PR.QUAL_CAP / 10)))), 1)
+
+
 # ----------------------------------------------------------------------------- main
-def make_calls(mchroms, chroms, labels, fit, wins, res, slogp, data, gaps, work, ref_sources, log):
+def make_calls(mchroms, chroms, labels, fit, wins, slogp, data, gaps, work, ref_sources, log):
     S = len(labels)
-    resolvable = {(r["recipient"], r["donor"]): r["resolvable"] for r in res}
+    inull = IdentityNull(chroms, data)
     segs = {}
     for m, c, w, post, binned in zip(mchroms, chroms, wins, fit["post"], fit["binned"]):
         sg = model.segments(m, w, post, binned, slogp)
@@ -163,14 +217,9 @@ def make_calls(mchroms, chroms, labels, fit, wins, res, slogp, data, gaps, work,
                     break
             if seg["terminal_left"] or seg["terminal_right"]:
                 flags.append("terminal")
-            filt = []
-            if seg["qual"] < PR.QUAL_PASS:
-                filt.append("LowQual")
-            if not resolvable[(s_i, t_i)]:
-                filt.append("unresolvable_pair")
-            if syn is False:
-                filt.append("nonsyntenic")
-            he.append({
+            ss_d = ssm / ssc if ssc else float("nan")
+            p_id = inull.p(s_i, t_i, b - a, ss_d, ssc) if hom_type == "non-reciprocal" and ssc else 1.0
+            he.append({"label_idx": s_i, "donor_idx": t_i, "p_identity": p_id,
                 "chrom": c["name"], "label": labels[s_i], "donor": labels[t_i],
                 "start": a, "end": b, "length": b - a, "n_windows": seg["win_b"] - seg["win_a"],
                 "bp_left_ci": "terminal" if seg["terminal_left"] else f"{seg['bp_left'][2]}-{seg['bp_left'][3]}",
@@ -182,8 +231,38 @@ def make_calls(mchroms, chroms, labels, fit, wins, res, slogp, data, gaps, work,
                 "homoeolog": hom_loc, "type": hom_type, "homoeolog_frac_recipient_origin": frac_s,
                 "ss_div": float(ssm / ssc) if ssc else float("nan"), "ss_cover": float(ssc / max(b - a, 1)),
                 "ss_div_baseline": base[(s_i, t_i)],
-                "flags": ",".join(flags) or ".", "filter": ";".join(filt) or "PASS"})
-    return segs, he
+                "flags": ",".join(flags) or "."})
+
+    # empirical-Bayes breakpoint rate: rate implied by the PASS calls, iterated to a fixed point
+    span = {}
+    for s_i in range(S):
+        sp = [w["end"] - w["start"] for w in wins if w["label"] == s_i and w["end"].size]
+        span[s_i] = float(np.median(np.concatenate(sp))) if sp else 1.0
+    evaluated = float(sum((w["end"] - w["start"]).sum() for w in wins))
+    rho = fit["rho"]
+    for _ in range(50):
+        res = model.resolution(fit, wins, S, rho, fit["rho_ac"])
+        resolvable = {(r["recipient"], r["donor"]): r["resolvable"] for r in res}
+        calibrate(he, rho, fit["rho_ac"], span, S)
+        for h in he:
+            filt = []
+            if h["qual"] < PR.QUAL_PASS:
+                filt.append("LowQual")
+            if not resolvable[(h["label_idx"], h["donor_idx"])]:
+                filt.append("unresolvable_pair")
+            if h["syntenic"] is False:
+                filt.append("nonsyntenic")
+            h["filter"] = ";".join(filt) or "PASS"
+        nbp = sum(int(h["bp_left_ci"] != "terminal") + int(h["bp_right_ci"] != "terminal")
+                  for h in he if h["filter"] == "PASS")
+        new = min(max(nbp / evaluated, PR.RHO_MIN), PR.RHO_MAX)
+        if abs(math.log(new / rho)) < 0.01:
+            rho = new
+            break
+        rho = new
+    log(f"calls: calibrated breakpoint rate {rho:.3g}/bp; serial correlation tau(5 windows)="
+        f"{tau_n(fit['rho_ac'], 5):.1f}, tau(100)={tau_n(fit['rho_ac'], 100):.1f}")
+    return segs, he, res, rho
 
 
 def nocall_regions(chroms, wins, data, refs, min_len):

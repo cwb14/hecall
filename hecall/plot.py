@@ -46,8 +46,8 @@ def painting(outdir, labels, chroms, segs, he, nocall, max_rows=None):
                 a, b = s["tile_start"], s["tile_end"]
                 if s.get("nosites"):
                     fc = "white"
-                elif s["qual"] < PR.QUAL_PASS:
-                    fc = UNCERTAIN
+                elif s["qual"] < PR.QUAL_PASS or s["state"] != c["label_idx"]:
+                    fc = UNCERTAIN  # foreign stretches are drawn saturated only where a PASS call covers them
                 else:
                     fc = _tint(color[s["state"]], 0.62)
                 ax.add_patch(Rectangle((a, y - bar / 2), b - a, bar, fc=fc, ec="none", lw=0))
@@ -79,7 +79,7 @@ def painting(outdir, labels, chroms, segs, he, nocall, max_rows=None):
         ax.text(0, nrow - 0.2 + 0.25, f"Subgenome {lab}", fontsize=7.5, ha="left", va="bottom")
     handles = [Patch(fc=_tint(color[i], 0.62), ec="none", label=f"{lab} origin") for i, lab in enumerate(labels)]
     handles += [Patch(fc=color[i], ec="none", label=f"exchange from {lab} (PASS)") for i, lab in enumerate(labels)]
-    handles += [Patch(fc=UNCERTAIN, ec="none", label="origin uncertain (QUAL < 20)"),
+    handles += [Patch(fc=UNCERTAIN, ec="none", label="origin uncertain / not PASS"),
                 Patch(fc="white", ec="#c8c8c8", hatch="xxxx", lw=0.4, label="not evaluable")]
     fig.legend(handles=handles, loc="lower center", ncol=min(4, len(handles)), fontsize=6, frameon=False,
                bbox_to_anchor=(0.5, 0.0), handlelength=1.6, columnspacing=1.2)
@@ -117,7 +117,7 @@ def _legend(outdir, labels, chroms, he, nocall):
             f"Each polyploid chromosome is drawn to scale, grouped by subgenome ({', '.join(labels)}). Pale fill "
             "shows the inferred origin along the chromosome; saturated blocks are PASS HEs, coloured by donor, "
             "each marked by a triangle so that exchanges too small to see at this scale remain visible. Light "
-            "grey marks stretches whose origin is uncertain (QUAL < 20); grey cross-hatching marks regions "
+            "grey marks stretches whose origin is uncertain or whose exchange call did not pass; grey cross-hatching marks regions "
             "too sparsely aligned to evaluate. "
             f"{len(p)} PASS HEs ({types['reciprocal']} reciprocal, {types['non-reciprocal']} non-reciprocal, "
             f"{types['unpaired']} without an assignable homoeologue); median length {med}. "

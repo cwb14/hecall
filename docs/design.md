@@ -1,6 +1,6 @@
 # hecall design note
 
-Date: 2026-10-08. Status: approved design (chat, 2026-10-08); implemented in hecall 0.1.0.
+Date: 2026-10-08. Status: approved design (chat, 2026-10-08); model revised after real-data testing (v0.2 windows, v0.3 calibration; section 6).
 
 ## 1. Goal
 
@@ -14,103 +14,98 @@ with a confidence value on every call, and say explicitly where no call can be m
 
 ## 2. Model (the one idea)
 
-Each polyploid base is compared with every reference genome. The states of an HMM are the
-polyploid's own subgenomes, and what "sequence from donor *t*" looks like is learned from the
-polyploid's subgenome *t* itself, not from the reference labelled *t*.
+Each polyploid region is compared with every reference genome. The HMM states are the polyploid's
+own subgenomes. What "sequence from donor *t*" looks like is learned from the polyploid's subgenome
+*t* itself, not from the reference labelled *t*.
 
-Why: references are often not the true donor (stand-ins, divergent accessions, polyploid parents,
-missing donors). A raw rule "closer to reference A than to B" fails in those cases. Sphagnum B,
-for example, is closer to the T reference than to its own B reference. A learned profile does not
-need the donor to be present. It only needs the references to tell the donors apart.
+This is needed because references are often not the true donor: stand-ins, divergent accessions,
+polyploid parents, missing donors. A raw rule "closer to reference A than to B" fails in those
+cases. A learned profile does not need the donor to be present; it needs the references to *tell
+the donors apart*.
 
-### 2.1 Sites
+### 2.1 Windows of equal information (v0.2)
 
-- Every reference genome is aligned to the whole polyploid, which is the query. Each polyploid base
-  then gets at most one aligned base from each reference.
-- Bases covered by more than one alignment from the same reference are dropped as ambiguous.
-- An **informative site** is a polyploid base that ≥ 2 references cover and that at least one covered
-  reference does not match.
-- Only SNVs are used. Indels are not, because a 5-kb TE indel would otherwise count as 5,000
-  correlated sites.
-- **Pattern**: one symbol per reference:
-  - `M`: matches the polyploid
-  - `.`: uncovered
-  - `a`, `b`, …: the distinct non-matching alleles, in order of appearance
-- With two references, the pattern is one of:
-  - `Ma`: matches reference 1 only
-  - `aM`: matches reference 2 only
-  - `aa`: polyploid-private
-  - `ab`: triallelic
+- Per-base codes are summed in 1-kb blocks: compared bases and SNV mismatches per reference.
+- A window grows over blocks until every reference has ≥ cmin compared bases. cmin gives ~10
+  expected mismatches to the closest reference at the genome's typical divergence, so the window's
+  log-divergence ratio has SE ~0.3–0.45.
+- A window needing more than 10× the median span is not formed. Such regions go to nocall.
+- **Feature:**
+  - centred log-divergences to the K references (Helmert contrasts, K−1 dimensions)
+  - projected by LDA onto ≤ S−1 dimensions when K−1 > S−1
+  - Centring removes the local mutation-rate or constraint level shared by all references.
+- **Emission:** a gridded KDE of the feature, one per state, fitted to windows assigned to that
+  state. The fit starts from chromosome labels; windows called non-native are reassigned and the
+  KDEs re-fitted (a few rounds).
+  - Native heterogeneity is therefore inside each state's density: incomplete lineage sorting,
+    introgression between progenitors, divergent reference haplotypes, hard-to-align regions.
+- **Diagnostic sites** are used only to place breakpoints between windows. A diagnostic site has
+  ≥ 2 covered references that disagree, and the polyploid matches at least one of them.
 
-### 2.2 Emission profiles
+### 2.2 HMM and segmentation
 
-- **P(pattern | state t)** = the frequency of that pattern among informative sites on the chromosomes
-  labelled *t*, with a pseudocount.
-- Refinement: HE segments contaminate the native profile of the subgenome that carries them. After
-  the first pass, bins called non-native are reassigned to their called state and the profiles are
-  re-estimated. This is repeated until the calls stop changing (at most a few rounds).
-- Profiles are never free-fitted (full Baum-Welch). With free fitting, a state could drift to model
-  gene-rich versus gene-poor regions instead of origin.
-- Patterns too rare to estimate are pooled into one `rare` category (threshold in params.py).
+- **Transitions:** continuous-time uniform switching at rate ρ (closed form over the distance
+  between window centres).
+- **Fitting:** ρ and the start distribution are fitted by EM. Forward-backward gives window
+  posteriors.
+- **Segments** are runs of the max-posterior state. Each boundary is refined at diagnostic-site
+  level inside the two flanking windows:
+  - P(cut) ∝ exp(cumulative site log-likelihood)
+  - the output is the ML cut and a 95% credible interval
+  - cuts are processed left to right and never cross
+- **Terminal segments** stop at the outermost evaluated window.
 
-### 2.3 HMM
+### 2.3 Calibrated quality (v0.3)
 
-- Sites are pooled into fixed-size bins. A bin's log emission is the sum over its sites. Empty bins
-  emit nothing.
-- Transition model: a continuous-time switch at rate ρ per bp, to any other state with equal chance.
-  The transition over a gap of *d* bp uses the closed form:
-  - P(stay) = 1/S + (S−1)/S · e^(−Sρd/(S−1))
-  - This gives the exact cost of crossing long site-free gaps.
-- ρ is estimated by EM (expected switches / total length) within fixed bounds.
-- Forward-backward gives a posterior per bin. Segments are runs of the maximum-posterior state.
+Window evidence is serially correlated: shared-ancestry blocks and regional divergence span many
+windows. In *Coffea* the correlation is 0.60 at lag 1, 0.20 at 10 and 0.06 at 100 windows. The
+HMM therefore over-counts evidence and is used only to propose candidates. Each candidate is
+scored with:
 
-### 2.4 Calls and quality
+- **LLR:** Σ over its n windows of [log f_t − log f_s] (KDE densities).
+- **τₙ:** 1 + 2 Σₖ₌₁ⁿ⁻¹ (1 − k/n) ρₖ, from native windows' evidence autocorrelation (Geyer
+  initial-positive truncation). This is the composite-likelihood / effective-sample-size
+  correction for a sum of n correlated terms: ≈3 for 5 windows, ≈15 for 100 in *Coffea*.
+- **log posterior odds:** LLR/τₙ + n_breakpoints · log(ρ_c · window span / (S−1)).
+  - ρ_c is empirical Bayes: the breakpoint rate implied by the PASS calls, iterated to a fixed
+    point.
+- **QUAL** = Phred(1 − posterior). PASS requires all of:
+  - QUAL ≥ 20
+  - a resolvable donor/recipient pair
+  - not `nonsyntenic`
+- **Resolution:** the smallest n with n·KL/τₙ + 2·log(ρ_c·span/(S−1)) ≥ ln 99. KL is the mean
+  evidence per window of donor sequence. A pair is unresolvable if no n up to a median chromosome
+  achieves this.
 
-For each non-native segment (state ≠ chromosome label):
+### 2.4 Independent evidence
 
-- **QUAL** = Phred(1 − mean posterior of the called state over the segment's bins), capped at 99.
-  PASS requires QUAL ≥ 20 (99%).
-- **LLR** = Σ over sites of [log P(pattern|t) − log P(pattern|s)]. This is the evidence independent
-  of ρ.
-- n_sites, n_support (sites favouring t), n_against.
-- **Breakpoints** are refined to site resolution. Within the boundary bins, P(cut after site i) ∝
-  exp(cumulative LLR). The output is the maximum-likelihood cut plus a 95% credible interval, and
-  the interval between the flanking informative sites is the resolution floor.
+- **Homoeologue (self alignment).** Each candidate is projected onto its homoeologous interval in
+  subgenome *t* (robust weighted percentiles of aligned bases) and classified as:
+  - `reciprocal`: that interval has origin *s*
+  - `non-reciprocal`: it keeps origin *t*. Both copies come from one donor, and `ss_div` ≪
+    `ss_div_baseline` confirms it.
+  - `unpaired`: no homoeologous alignment
+- `p_identity` = fraction of same-span genome blocks at least as similar between homoeologues.
+  - It is reported, not added to QUAL: near-identical homoeologous blocks are common genome-wide
+    (1% of 10-kb *Coffea* blocks have 0 mismatches), most likely conversion tracts themselves, so
+    that null is contaminated.
+- **Synteny.** The closest reference's sequence matching the candidate must be collinear with the
+  sequence matching at least one native flank of its non-native block. Positions are
+  aligned-base-weighted medians.
+  - A transposed TE fails, since neither flank agrees.
+  - So does a non-homoeologous (translocation-like) segment.
+  - An exchange next to a rearrangement between assemblies passes, because one flank agrees.
 
-### 2.5 Independent evidence (homoeolog check)
+### 2.5 Artifact flags and no-calls
 
-The subgenomes are aligned to each other. Each HE segment on chromosome X is projected to its
-homoeologous interval on the subgenome-*t* chromosome, and classified as:
-
-- **reciprocal**: the homoeolog carries origin *s* there (the segments swapped, 2:2).
-- **non-reciprocal**: the homoeolog keeps origin *t*. Both copies come from *t* (4:0 dosage), so the
-  identity between the two copies across the segment should rise to within-donor level. That
-  identity is reported against the genome-wide baseline for the pair.
-- **unpaired**: there is no homoeologous alignment, so the type cannot be told.
-
-Pre-polyploid introgression into a donor shows neither signature.
-
-### 2.6 Artifact flags
-
-- `gap_bp`: an assembly gap (N run) lies inside a breakpoint credible interval. This may be a misjoin,
-  which cannot be told apart from a reciprocal HE without reads.
-- `terminal`: the segment reaches a chromosome end (information only; crossover-derived HEs are often
-  distal).
-- `label_conflict`: the chromosome's majority origin differs from its label.
-- Synteny: only alignments within collinear chains are used. TEs that transposed between subgenomes
-  after polyploidy would otherwise mimic tiny HEs.
-
-### 2.7 What is not called (and said so)
-
-- `nocall.bed`: runs with no informative sites that are longer than the minimum detectable HE. The
-  reason is one of no reference coverage, only one reference, or no differences.
-- Resolution per subgenome pair:
-  - expected LLR per kb = KL(profile_t ‖ profile_s) × site density
-  - minimum detectable length L* = LLR needed for QUAL 20 at the fitted ρ ÷ LLR per kb
-  - If L* exceeds the median chromosome length of *s*, the pair is `unresolvable`: its calls are
-    reported with FILTER = unresolvable_pair, never PASS.
-- No subgenome structure (e.g. Rosa 'Carola' haplotypes) shows up as unresolvable pairs; the tool
-  does not force a call.
+- **Flags:**
+  - `gap_at_breakpoint`: an assembly gap lies inside a breakpoint CI. This may be a misjoin, which
+    looks like a reciprocal exchange.
+  - `terminal`
+- `label_conflict` appears in chromosomes.tsv.
+- `nocall.bed`: stretches covered by no window, at least one median window span long. The reason
+  is `no_alignment` or `sparse_alignment(<refs>)`.
+- Subgenome pairs the data cannot tell apart are `unresolvable`: their calls are never PASS.
 
 ## 3. Alignment (benchmarked 2026-10-08)
 
@@ -179,6 +174,18 @@ Output (one directory per polyploid):
 - one quick run on a dissimilar genome
 
 ## 6. Decisions log
+
+- 2026-10-08 v0.1 → v0.2: the per-site i.i.d. HMM over diagnostic and private sites failed on
+  *Coffea*: 5,671 PASS calls, and the breakpoint rate sat at its upper bound.
+  - Native C sequence matches the E reference at 20% of diagnostic sites, in correlated blocks
+    (1-kb lag-1 autocorrelation 0.73; variance 8–130× binomial).
+  - Polyploid-private sites pile up in fast-evolving regions.
+  - Context classes (conditioning on closest-reference divergence) were tried and dropped: with a
+    stand-in reference the class becomes confounded with origin (synthetic stand-in test failed).
+  - The window model learned from the polyploid's own subgenomes replaced it.
+- 2026-10-08 v0.2 → v0.3: a single global τ (integrated autocorrelation, 116 windows in *Coffea*)
+  over-tempered short segments. It was replaced by the length-specific τₙ per candidate and an
+  empirical-Bayes breakpoint prior. *Coffea*: 149 → 15 PASS.
 
 - 2026-10-08:
   - States = polyploid subgenomes, not references (handles missing and stand-in donors).

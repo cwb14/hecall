@@ -28,7 +28,7 @@ def test_recovers_planted_run_and_null_chromosomes():
     assert len(found) == 1
     i, a, b, q = found[0]
     assert i == 0 and abs(a - 400) <= 2 and abs(b - 420) <= 2 and q >= 20
-    res = model.resolution(fit, wins, 2)
+    res = model.resolution(fit, wins, 2, fit["rho"], fit["rho_ac"])
     assert all(r["resolvable"] for r in res)
 
 
@@ -36,7 +36,7 @@ def test_indistinguishable_origins_unresolvable():
     rng = np.random.default_rng(2)
     wins = [sim(0, 500, rng, mu=(0.0, 0.05)), sim(1, 500, rng, mu=(0.0, 0.05))]
     fit = model.run(wins, 2)
-    assert not any(r["resolvable"] for r in model.resolution(fit, wins, 2))
+    assert not any(r["resolvable"] for r in model.resolution(fit, wins, 2, fit["rho"], fit["rho_ac"]))
 
 
 def test_refine_breakpoint_finds_switch():
@@ -63,3 +63,12 @@ def test_segment_cuts_ordered_and_positive():
     tiles = [(s["tile_start"], s["tile_end"]) for s in segs]
     assert all(b > a for a, b in tiles)
     assert all(t1[0] == t0[1] for t0, t1 in zip(tiles[:-1], tiles[1:]))
+
+
+def test_tau_n_grows_with_segment_length_under_correlation():
+    rho = np.zeros(200)
+    rho[0] = 1
+    rho[1:50] = 0.5 * np.exp(-np.arange(1, 50) / 10)
+    assert model.tau_n(rho, 1) == 1.0
+    assert 1.0 < model.tau_n(rho, 5) < model.tau_n(rho, 100)
+    assert model.tau_n(np.r_[1.0, np.zeros(10)], 50) == 1.0
