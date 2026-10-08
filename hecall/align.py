@@ -113,6 +113,29 @@ def align_chain(query_gdb, target_gdb, out_root, threads, tmpdir, tools, log):
     with open(log, "a") as lf:
         lf.write(f"# prefilter {raw}: kept {int(keep.sum())} of {keep.size} alignments\n")
     pre = out_root + ".pre"
+    alnfilter = find_alnfilter()
+    if alnfilter:  # copy kept records directly (binary, seconds)
+        keep.astype("uint8").tofile(pre + ".mask")
+        run([alnfilter, raw, pre + ".mask", pre + ".1aln"], log, tools)
+    else:          # fallback: CIGAR PAF of every raw alignment -> filter -> PAFtoALN (slow on big inputs)
+        _filter_via_paf(raw, keep, qs, pre, query_gdb, target_gdb, threads, tools, log)
+    run([tools["ALNchain"], f"-o{chain}.tmp.1aln", pre + ".1aln"], log, tools)
+    os.replace(chain + ".tmp.1aln", chain)
+    for f in (raw, raw + ".done", pre + ".paf", pre + ".1aln", pre + ".mask"):
+        if os.path.exists(f):
+            os.remove(f)
+    return chain
+
+
+def find_alnfilter():
+    """The alnfilter helper (csrc/build.sh -> bin/alnfilter in this repository), or on PATH."""
+    here = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "alnfilter")
+    if os.access(here, os.X_OK):
+        return here
+    return shutil.which("alnfilter")
+
+
+def _filter_via_paf(raw, keep, qs, pre, query_gdb, target_gdb, threads, tools, log):
     p = subprocess.Popen([tools["ALNtoPAF"], "-x", f"-T{threads}", raw], stdout=subprocess.PIPE,
                          stderr=subprocess.DEVNULL, env=_env(tools), bufsize=1 << 20)
     n = 0
@@ -129,12 +152,6 @@ def align_chain(query_gdb, target_gdb, out_root, threads, tmpdir, tools, log):
         raise SystemExit(f"hecall: ALNtoPAF -x on {raw} gave {n} lines, expected {keep.size}")
     srcs = [query_gdb + ".1gdb"] + ([target_gdb + ".1gdb"] if target_gdb is not None else [])
     run([tools["PAFtoALN"], f"-T{threads}", pre + ".paf"] + srcs, log, tools)
-    run([tools["ALNchain"], f"-o{chain}.tmp.1aln", pre + ".1aln"], log, tools)
-    os.replace(chain + ".tmp.1aln", chain)
-    for f in (raw, raw + ".done", pre + ".paf", pre + ".1aln"):
-        if os.path.exists(f):
-            os.remove(f)
-    return chain
 
 
 def paf_stream(chain_1aln, threads, tools, swap=False):
