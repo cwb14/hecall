@@ -42,7 +42,7 @@ def write_all(outdir, labels, refs, chroms, segs, he, nocall, chrom_rows, fit, w
         for h in sorted(he, key=lambda h: (h["chrom"], h["start"])):
             row = dict(h)
             row["closest_ref"] = rnames[h["closest_ref"]]
-            row["syntenic"] = "." if h["syntenic"] is None else ("yes" if h["syntenic"] else "no")
+            row["syntenic"] = h["syntenic"] or "."
             for n, v in zip(rnames, h["ref_div"]):
                 row[f"div_{n}"] = v
             fh.write("\t".join(row[c] if isinstance(row.get(c), str) else _f(row.get(c)) for c in cols) + "\n")

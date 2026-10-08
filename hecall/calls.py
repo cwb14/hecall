@@ -65,17 +65,24 @@ def project(aln, a, b):
         return (lo + hi) / 2
 
     return {"target": best, "lo": int(pct(0.05)), "hi": int(pct(0.95)), "t_med": pct(0.5),
-            "q_med": float(np.average(qm, weights=wm)), "bp": int(wm.sum())}
+            "q_med": float(np.average(qm, weights=wm)), "bp": int(wm.sum()),
+            "target_bp": int(tot[best]), "total_bp": int(w.sum())}
 
 
 def syntenic(aln, a, b, block_a, block_b):
-    """Is the reference sequence matching [a,b) collinear with the sequence matching the native
-    flanks of the non-native block [block_a, block_b) that contains it?
+    """Where does the reference sequence matching [a,b) lie, relative to the sequence matching the
+    native flanks of the non-native block [block_a, block_b) that contains it?
 
-    Flanks: max(block length, SYNTENY_FLANK_MIN_BP) (capped at SYNTENY_FLANK_MAX_BP) on each side of
-    the block. True if collinear with at least one flank (a rearrangement between assemblies can
-    sit on one side); False if no flank agrees (transposed repeat, translocation, misassembly);
-    None if no flank aligns. Also returns the segment's core target interval."""
+    Returns (class, core target interval). Classes:
+      homoeologous  collinear with at least one native flank (a rearrangement between assemblies can
+                    sit on one side)
+      translocation not collinear with any flank, but the matching sequence is one collinear chain
+                    on another chromosome or position, spanning at least half the segment and
+                    >= SYNTENY_FLANK_MIN_BP: an intergenomic exchange between non-homoeologous
+                    positions (a transposed repeat or scattered hits form no such chain)
+      nonsyntenic   neither (transposed repeat, scattered hits, misassembly)
+      None          no flank aligns (cannot tell)
+    Flanks: max(block length, SYNTENY_FLANK_MIN_BP) (capped at SYNTENY_FLANK_MAX_BP) on each side."""
     seg = project(aln, a, b)
     if seg is None:
         return None, None
@@ -91,7 +98,13 @@ def syntenic(aln, a, b, block_a, block_b):
         verdicts.append(fl["target"] == seg["target"] and
                         abs(seg["t_med"] - fl["t_med"]) <= PR.SYNTENY_SLACK_BP + PR.SYNTENY_FOLD * dq)
     target = f"{seg['target']}:{seg['lo']}-{seg['hi']}"
-    return (any(verdicts) if verdicts else None), target
+    if not verdicts:
+        return None, target
+    if any(verdicts):
+        return "homoeologous", target
+    if seg["hi"] - seg["lo"] >= max(PR.SYNTENY_FLANK_MIN_BP, 0.5 * (b - a)):
+        return "translocation", target
+    return "nonsyntenic", target
 
 
 def code_stats(work, source, chrom, a, b):
@@ -267,7 +280,7 @@ def make_calls(mchroms, chroms, labels, fit, wins, slogp, data, gaps, work, ref_
                 filt.append("LowQual")
             if not resolvable[(h["label_idx"], h["donor_idx"])]:
                 filt.append("unresolvable_pair")
-            if h["syntenic"] is False:
+            if h["syntenic"] == "nonsyntenic":
                 filt.append("nonsyntenic")
             h["filter"] = ";".join(filt) or "PASS"
         nbp = sum(int(h["bp_left_ci"] != "terminal") + int(h["bp_right_ci"] != "terminal")

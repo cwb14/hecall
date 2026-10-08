@@ -71,12 +71,19 @@ Reruns resume from checkpoints in `out/work/`.
   - `PASS`
   - `LowQual` (QUAL < 20)
   - `unresolvable_pair` (the data cannot tell these two donors apart)
-  - `nonsyntenic` (the matching reference sequence is not at the homoeologous position:
-    transposed TE, translocation or misassembly)
+  - `nonsyntenic` (the matching reference sequence is neither at the homoeologous position nor
+    one long collinear block elsewhere: transposed repeat, scattered hits or misassembly)
 - **`type`**:
   - `reciprocal`: the homoeologue carries the swapped piece
   - `non-reciprocal`: both copies are from the donor; `ss_div` ≪ `ss_div_baseline` confirms it
   - `unpaired`: no alignable homoeologue
+- **`syntenic`**:
+  - `homoeologous`: the donor-like sequence is collinear with the native flanks, i.e. an exchange
+    at the homoeologous position
+  - `translocation`: a long collinear block from another chromosome or position, i.e. an
+    intergenomic exchange between non-homoeologous sites, such as the tobacco Nt21/Nt22
+    translocation
+  - `nonsyntenic`
 - **`llr`, `tau_n`, `n_windows`**: summed window evidence, its serial-correlation discount, and the
   number of windows.
 - **`n_sites`, `n_support`, `n_against`**: diagnostic sites inside the segment and how many favour

@@ -183,6 +183,14 @@ Output (one directory per polyploid):
   - Context classes (conditioning on closest-reference divergence) were tried and dropped: with a
     stand-in reference the class becomes confounded with origin (synthetic stand-in test failed).
   - The window model learned from the polyploid's own subgenomes replaced it.
+- 2026-10-08 v0.3.5: synteny check has three classes:
+  - `homoeologous`
+  - `translocation`: one collinear chain on another chromosome or position, spanning at least half
+    the segment and >= 100 kb
+  - `nonsyntenic`, filtered
+  - Why: *N. tabacum*'s published reciprocal intergenomic translocation (Nt21/Nt22 = our chr06T /
+    chr09S, 32 + 81 Mb) was found at QUAL 99 but filtered. *Ae. ventricosa*'s 1N/3D arm exchange is
+    the same class, so the change rests on 2 complexes.
 - 2026-10-08 v0.2 → v0.3: a single global τ (integrated autocorrelation, 116 windows in *Coffea*)
   over-tempered short segments. It was replaced by the length-specific τₙ per candidate and an
   empirical-Bayes breakpoint prior. *Coffea*: 149 → 15 PASS.

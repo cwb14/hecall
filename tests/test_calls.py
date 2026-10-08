@@ -21,13 +21,18 @@ def test_projection_follows_collinear_chain_not_scattered_repeats():
     assert 50_500_000 <= p["lo"] and p["hi"] <= 60_500_000
 
 
-def test_synteny_true_for_homoeologous_segment_false_for_transposed_copy():
+def test_synteny_classes_homoeologous_translocation_transposed_repeat():
     chain = [(q, q + 90_000, True, "Y", q, q + 90_000) for q in range(0, 3_000_000, 100_000)]
-    a = aln(chain)
-    ok, _ = calls.syntenic(a, 1_000_000, 1_200_000, 1_000_000, 1_200_000)
-    assert ok is True
-    # segment whose only alignment is to a distant place on another chromosome
+    cls, _ = calls.syntenic(aln(chain), 1_000_000, 1_200_000, 1_000_000, 1_200_000)
+    assert cls == "homoeologous"
+    # a 200-kb block whose only match is a collinear block on another chromosome: translocation
     b = aln([r for r in chain if not (1_000_000 <= r[0] < 1_200_000)] +
-            [(1_000_000, 1_190_000, True, "Z", 40_000_000, 40_190_000)])
-    ok, tgt = calls.syntenic(b, 1_000_000, 1_200_000, 1_000_000, 1_200_000)
-    assert ok is False and tgt.startswith("Z:")
+            [(1_000_000 + i * 20_000, 1_018_000 + i * 20_000, True, "Z", 40_000_000 + i * 20_000,
+              40_018_000 + i * 20_000) for i in range(10)])
+    cls, tgt = calls.syntenic(b, 1_000_000, 1_200_000, 1_000_000, 1_200_000)
+    assert cls == "translocation" and tgt.startswith("Z:")
+    # a 6-kb segment matching a repeat copy elsewhere (transposed TE): nonsyntenic
+    c = aln([r for r in chain if not (1_000_000 <= r[0] < 1_100_000)] +
+            [(1_000_000, 1_006_000, True, "Z", 40_000_000, 40_006_000)])
+    cls, _ = calls.syntenic(c, 1_000_000, 1_006_000, 1_000_000, 1_006_000)
+    assert cls == "nonsyntenic"
