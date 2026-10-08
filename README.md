@@ -20,7 +20,10 @@ hecall also says where it cannot tell.
   - References don't need labels: hecall never assumes reference X *is* donor X.
 - **Software:**
   - FastGA suite on PATH (or `HECALL_FASTGA=/path/to/FASTGA`)
-  - Python ≥ 3.9 with numpy and matplotlib
+  - Python ≥ 3.9 with numpy, scipy, pandas and matplotlib
+- **Recommended for multi-Gb genomes:** build the small `alnfilter` helper against the FASTGA
+  source tree: `bash csrc/build.sh /path/to/FASTGA`, which writes `bin/alnfilter`.
+  - Without it, hecall falls back to a slower PAF round trip.
 
 ## How it works (one paragraph)
 
