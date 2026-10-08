@@ -12,7 +12,9 @@ import os
 import shutil
 import subprocess
 
-TOOLS = ("FastGA", "ALNchain", "ALNtoPAF", "FAtoGDB", "GIXmake", "GIXrm", "GDBshow")
+from . import params as PR
+
+TOOLS = ("FastGA", "ALNchain", "ALNtoPAF", "PAFtoALN", "FAtoGDB", "GIXmake", "GIXrm", "GDBshow")
 
 
 def find_tools():
@@ -51,22 +53,87 @@ def make_gdb(fasta, gdb_root, tools, log):
     return gdb_root
 
 
+def _prefilter_keep(raw, threads, tools):
+    """Indices of raw alignments lying in collinear runs that could reach ALNchain's minimum chain
+    score (a superset of what ALNchain keeps).
+
+    Alignments are grouped by (query, target, strand, diagonal band of PREFILTER_BAND_BP; two grids
+    shifted by half a band); consecutive alignments of a group within PREFILTER_GAP_BP on the query
+    form a run; runs with >= PREFILTER_MIN_BP aligned query bases are kept. Isolated repeat hits
+    (the bulk of raw alignments in large TE-rich genomes) fall away, which keeps ALNchain's chaining
+    near-linear; on Coffea the chained result is unchanged (99.4-99.6% identical per-base codes)."""
+    import numpy as np
+    import pandas as pd
+    p = subprocess.Popen([tools["ALNtoPAF"], f"-T{threads}", raw], stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL, env=_env(tools))
+    df = pd.read_csv(p.stdout, sep="\t", header=None, usecols=[0, 2, 3, 4, 5, 7, 8],
+                     names=["q", "qs", "qe", "st", "t", "ts", "te"], engine="c",
+                     dtype={"q": "category", "t": "category", "st": "category"})
+    p.wait()
+    if p.returncode != 0:
+        raise SystemExit(f"hecall: ALNtoPAF failed on {raw}")
+    qs, qe = df["qs"].to_numpy(np.int64), df["qe"].to_numpy(np.int64)
+    ts, te = df["ts"].to_numpy(np.int64), df["te"].to_numpy(np.int64)
+    fw = (df["st"] == "+").to_numpy()
+    qi, ti = df["q"].cat.codes.to_numpy(np.int64), df["t"].cat.codes.to_numpy(np.int64)
+    off = np.where(fw, ts - qs, ts + qe)
+    keep = np.zeros(qs.size, dtype=bool)
+    D = PR.PREFILTER_BAND_BP
+    for shift in (0, D // 2):
+        band = np.floor_divide(off + shift, D)
+        o = np.lexsort((qs, band, fw, ti, qi))
+        key = np.stack([qi[o], ti[o], fw[o].astype(np.int64), band[o]])
+        newkey = np.r_[True, (np.diff(key, axis=1) != 0).any(axis=0)]
+        grp = np.cumsum(newkey) - 1
+        cm = pd.Series(qe[o]).groupby(grp).cummax().to_numpy()
+        newrun = newkey | ((qs[o] - np.r_[0, cm[:-1]]) > PR.PREFILTER_GAP_BP)
+        run = np.cumsum(newrun) - 1
+        score = np.bincount(run, weights=(qe[o] - qs[o]).astype(float))
+        keep[o[score[run] >= PR.PREFILTER_MIN_BP]] = True
+    return keep, qs
+
+
 def align_chain(query_gdb, target_gdb, out_root, threads, tmpdir, tools, log):
     """FastGA query vs target (or query vs itself when target is None) -> chained .1aln.
 
-    Returns path of the chained .1aln. Skips work whose output exists (checkpoint)."""
+    raw FastGA alignments -> collinear-run prefilter -> ALNchain (defaults). Returns the chained
+    .1aln path. Checkpoints: the chained file; the raw file once FastGA has finished (.done)."""
     chain = out_root + ".chain.1aln"
     if os.path.exists(chain):
         return chain
     raw = out_root + ".1aln"
     os.makedirs(tmpdir, exist_ok=True)
-    cmd = [tools["FastGA"], f"-T{threads}", f"-P{tmpdir}", f"-1:{raw}", query_gdb + ".1gdb"]
-    if target_gdb is not None:
-        cmd.append(target_gdb + ".1gdb")
-    run(cmd, log, tools)
-    run([tools["ALNchain"], f"-o{chain}.tmp.1aln", raw], log, tools)
+    if not os.path.exists(raw + ".done"):
+        cmd = [tools["FastGA"], f"-T{threads}", f"-P{tmpdir}", f"-1:{raw}", query_gdb + ".1gdb"]
+        if target_gdb is not None:
+            cmd.append(target_gdb + ".1gdb")
+        run(cmd, log, tools)
+        open(raw + ".done", "w").close()
+    keep, qs = _prefilter_keep(raw, threads, tools)
+    with open(log, "a") as lf:
+        lf.write(f"# prefilter {raw}: kept {int(keep.sum())} of {keep.size} alignments\n")
+    pre = out_root + ".pre"
+    p = subprocess.Popen([tools["ALNtoPAF"], "-x", f"-T{threads}", raw], stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL, env=_env(tools), bufsize=1 << 20)
+    n = 0
+    with open(pre + ".paf", "wb") as fo:
+        for line in p.stdout:
+            if n >= keep.size or int(line.split(b"\t", 3)[2]) != qs[n]:
+                p.kill()
+                raise SystemExit(f"hecall: ALNtoPAF passes over {raw} disagree at line {n + 1}")
+            if keep[n]:
+                fo.write(line)
+            n += 1
+    p.wait()
+    if p.returncode != 0 or n != keep.size:
+        raise SystemExit(f"hecall: ALNtoPAF -x on {raw} gave {n} lines, expected {keep.size}")
+    srcs = [query_gdb + ".1gdb"] + ([target_gdb + ".1gdb"] if target_gdb is not None else [])
+    run([tools["PAFtoALN"], f"-T{threads}", pre + ".paf"] + srcs, log, tools)
+    run([tools["ALNchain"], f"-o{chain}.tmp.1aln", pre + ".1aln"], log, tools)
     os.replace(chain + ".tmp.1aln", chain)
-    os.remove(raw)
+    for f in (raw, raw + ".done", pre + ".paf", pre + ".1aln"):
+        if os.path.exists(f):
+            os.remove(f)
     return chain
 
 

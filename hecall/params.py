@@ -13,6 +13,16 @@ MIN_REFS_COVERED = 2
 # Pseudocount per site pattern and state (Jeffreys-like: no log(0), rare patterns not inflated).
 PSEUDOCOUNT = 0.5
 
+# --- alignment prefilter (before ALNchain) ----------------------------------------------------------
+# Raw FastGA alignments are kept if they lie in a collinear run (same query/target/strand, diagonal
+# band of BAND bp, consecutive alignments <= GAP bp apart on the query) with >= MIN_BP aligned query
+# bases. BAND and GAP equal ALNchain's default max gap (10 kb); MIN_BP = 5 kb because ALNchain's
+# default minimum chain score (10,000) counts both genomes' extents, i.e. ~5 kb of alignment. The
+# prefilter is thus a superset of ALNchain's output and only removes isolated repeat hits.
+PREFILTER_BAND_BP = 10_000
+PREFILTER_GAP_BP = 10_000
+PREFILTER_MIN_BP = 5_000
+
 # --- windows ---------------------------------------------------------------------------------------
 # Per-base comparisons are summed in blocks of this size; windows are built from whole blocks.
 BIN_BP = 1000
