@@ -66,9 +66,9 @@ def _sites_worker(job):
 
 
 def _extract_worker(job):
-    chain, source, chrom_len, workdir, tools, threads, target_set = job
-    extract.extract_source(chain, source, chrom_len, workdir, tools, threads, target_set)
-    return source
+    chain, source, chrom_len, workdir, tools, threads, target_set, swap, tag = job
+    extract.extract_source(chain, source, chrom_len, workdir, tools, threads, target_set, swap, tag)
+    return tag or source
 
 
 # ----------------------------------------------------------------------------- main
@@ -109,24 +109,49 @@ def run(subgenome_args, ref_args, outdir, threads=8, verbose=False, keep_work=Tr
     os.makedirs(tmp, exist_ok=True)
     chains = []
     need = [i for i in range(K) if not os.path.exists(os.path.join(work, f"aln_ref{i}.chain.1aln"))]
-    need_self = not os.path.exists(os.path.join(work, "aln_self.chain.1aln"))
-    if need or need_self:
-        if not os.path.exists(poly + ".gix"):
-            align.run([tools["GIXmake"], f"-T{threads}", f"-P{tmp}", poly + ".1gdb"], alog, tools)
+    if need and not os.path.exists(poly + ".gix"):
+        align.run([tools["GIXmake"], f"-T{threads}", f"-P{tmp}", poly + ".1gdb"], alog, tools)
     for i in range(K):
         log(f"align: polyploid vs {names[i]}", detail=i not in need)
         chains.append(align.align_chain(poly, ref_gdbs[i], os.path.join(work, f"aln_ref{i}"), threads, tmp, tools, alog))
-    log("align: polyploid vs itself (homoeologues)", detail=not need_self)
-    self_chain = align.align_chain(poly, None, os.path.join(work, "aln_self"), threads, tmp, tools, alog)
     if os.path.exists(poly + ".gix"):
         align.run([tools["GIXrm"], poly + ".gix"], alog, tools)
+    # homoeologues: each pair of subgenomes aligned directly (legacy runs: whole polyploid vs itself)
+    self_chain = os.path.join(work, "aln_self.chain.1aln")
+    legacy_self = os.path.exists(self_chain)
+    pair_chain = {}
+    if not legacy_self:
+        sub_gdb = []
+        for li, lab in enumerate(labels):
+            g = os.path.join(work, f"sub{li}")
+            if not os.path.exists(g + ".1gdb"):
+                files = [p for l, p in subs if l == lab]
+                fa = files[0] if len(files) == 1 else inputs.concat_fastas(
+                    files, os.path.join(work, f"sub{li}.fa.gz" if files[0].endswith(".gz") else f"sub{li}.fa"))
+                align.make_gdb(fa, g, tools, alog)
+                if len(files) > 1:
+                    os.remove(fa)
+            sub_gdb.append(g)
+        for i in range(S):
+            for j in range(i + 1, S):
+                root = os.path.join(work, f"aln_ss{i}_{j}")
+                log(f"align: subgenome {labels[i]} vs {labels[j]} (homoeologues)",
+                    detail=os.path.exists(root + ".chain.1aln"))
+                pair_chain[(i, j)] = align.align_chain(sub_gdb[i], sub_gdb[j], root, threads, tmp, tools, alog)
 
     # ---- extract
     ref_sources = [f"ref{i}" for i in range(K)]
-    jobs = [(chains[i], ref_sources[i], chrom_len, work, tools, 2, None) for i in range(K)]
-    for lab in labels:
-        tset = {c["name"] for c in chroms if c["label"] == lab}
-        jobs.append((self_chain, f"ss_{lab}", chrom_len, work, tools, 2, tset))
+    jobs = [(chains[i], ref_sources[i], chrom_len, work, tools, 2, None, False, None) for i in range(K)]
+    if legacy_self:
+        for lab in labels:
+            tset = {c["name"] for c in chroms if c["label"] == lab}
+            jobs.append((self_chain, f"ss_{lab}", chrom_len, work, tools, 2, tset, False, None))
+    else:
+        for (i, j), ch in pair_chain.items():
+            cl_i = {c["name"]: c["length"] for c in chroms if c["label_idx"] == i}
+            cl_j = {c["name"]: c["length"] for c in chroms if c["label_idx"] == j}
+            jobs.append((ch, f"ss_{labels[j]}", cl_i, work, tools, 2, None, False, f"ss_{labels[j]}.from_{labels[i]}"))
+            jobs.append((ch, f"ss_{labels[i]}", cl_j, work, tools, 2, None, True, f"ss_{labels[i]}.from_{labels[j]}"))
     log("extract: per-base comparison with each reference and homoeologue")
     with Pool(min(threads, len(jobs))) as pool:
         for src in pool.imap_unordered(_extract_worker, jobs):
@@ -213,8 +238,9 @@ def run(subgenome_args, ref_args, outdir, threads=8, verbose=False, keep_work=Tr
     codes = os.path.join(work, "codes")
     for src in ref_sources + [f"ss_{lab}" for lab in labels]:
         shutil.rmtree(os.path.join(codes, src), ignore_errors=True)
-        if os.path.exists(os.path.join(codes, src + ".done")):
-            os.remove(os.path.join(codes, src + ".done"))
+    for f in os.listdir(codes):
+        if f.endswith(".done"):
+            os.remove(os.path.join(codes, f))
     from . import __version__
     with open(os.path.join(outdir, "hecall.done"), "w") as fh:
         fh.write(f"hecall {__version__}\t{npass} PASS\t{len(he)} candidates\n")

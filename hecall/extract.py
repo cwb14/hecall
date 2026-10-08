@@ -21,19 +21,23 @@ def _flush(outdir, qname, qlen, recs):
     os.replace(tmp, os.path.join(outdir, f"{qname}.npy"))
 
 
-def extract_source(chain, source, chrom_len, workdir, tools, threads, target_set=None, swap=False):
+def extract_source(chain, source, chrom_len, workdir, tools, threads, target_set=None, swap=False, tag=None):
     """Parse one chained alignment into per-chromosome codes.
 
-    target_set: if given, only alignments whose target is in this set are used (self alignment
-    split by subgenome). swap: read the alignment with genomes swapped (ALNtoPAF -w).
-    Writes <workdir>/codes/<source>/ and a .done marker; skips if the marker exists.
+    chrom_len: polyploid chromosomes to extract (others in the stream are ignored).
+    target_set: if given, only alignments whose target is in this set are used (legacy self
+    alignment split by subgenome). swap: read the alignment with genomes swapped (ALNtoPAF -w), i.e.
+    the second genome becomes the query. tag: name of this extraction's done marker and alignment
+    table (default: source); several extractions may fill one source (pairwise subgenome alignments).
+    Writes <workdir>/codes/<source>/<chrom>.npy and skips if <tag>.done exists.
     """
+    tag = tag or source
     outdir = os.path.join(workdir, "codes", source)
-    done = outdir + ".done"
+    done = os.path.join(workdir, "codes", f"{tag}.done")
     if os.path.exists(done):
         return
     os.makedirs(outdir, exist_ok=True)
-    alnf = gzip.open(os.path.join(workdir, "codes", f"{source}.aln.tsv.gz"), "wt", compresslevel=3)
+    alnf = gzip.open(os.path.join(workdir, "codes", f"{tag}.aln.tsv.gz"), "wt", compresslevel=3)
     cur, recs = None, []
     seen = set()
     p = align.paf_stream(chain, threads, tools, swap=swap)
@@ -71,17 +75,20 @@ def load_codes(workdir, source, chrom, length):
 
 
 def load_aln(workdir, source):
-    """Alignment table as dict chrom -> structured arrays."""
+    """Alignment tables of one source (all its extractions) as dict chrom -> arrays."""
+    import glob
+    import pandas as pd
+    files = sorted(set(glob.glob(os.path.join(workdir, "codes", f"{source}.aln.tsv.gz")) +
+                       glob.glob(os.path.join(workdir, "codes", f"{source}.from_*.aln.tsv.gz"))))
+    frames = [pd.read_csv(f, sep="\t", header=None, names=["q", "qs", "qe", "st", "t", "ts", "te", "div"],
+                          dtype={"q": str, "t": str, "st": str}) for f in files]
+    frames = [f for f in frames if len(f)]
+    if not frames:
+        return {}
+    df = pd.concat(frames, ignore_index=True)
     out = {}
-    f = os.path.join(workdir, "codes", f"{source}.aln.tsv.gz")
-    rows = {}
-    with gzip.open(f, "rt") as fh:
-        for line in fh:
-            q, qs, qe, st, t, ts, te, dv = line.rstrip("\n").split("\t")
-            rows.setdefault(q, []).append((int(qs), int(qe), st == "+", t, int(ts), int(te), float(dv)))
-    for q, r in rows.items():
-        out[q] = {"qs": np.array([x[0] for x in r]), "qe": np.array([x[1] for x in r]),
-                  "fwd": np.array([x[2] for x in r]), "t": np.array([x[3] for x in r], dtype=object),
-                  "ts": np.array([x[4] for x in r]), "te": np.array([x[5] for x in r]),
-                  "div": np.array([x[6] for x in r])}
+    for q, g in df.groupby("q", sort=False):
+        out[q] = {"qs": g["qs"].to_numpy(), "qe": g["qe"].to_numpy(), "fwd": (g["st"] == "+").to_numpy(),
+                  "t": g["t"].to_numpy(dtype=object), "ts": g["ts"].to_numpy(), "te": g["te"].to_numpy(),
+                  "div": g["div"].to_numpy()}
     return out
