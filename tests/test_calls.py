@@ -1,0 +1,33 @@
+import numpy as np
+
+from hecall import calls
+
+
+def aln(rows):
+    """rows: (qs, qe, fwd, target, ts, te)"""
+    return {"qs": np.array([r[0] for r in rows]), "qe": np.array([r[1] for r in rows]),
+            "fwd": np.array([r[2] for r in rows]), "t": np.array([r[3] for r in rows], dtype=object),
+            "ts": np.array([r[4] for r in rows]), "te": np.array([r[5] for r in rows]),
+            "div": np.zeros(len(rows))}
+
+
+def test_projection_follows_collinear_chain_not_scattered_repeats():
+    # a 9-Mb segment aligned collinearly to Y:51-60 Mb (offset +6 Mb), plus repeat hits all over Y
+    rows = [(q, q + 400_000, True, "Y", q + 6_000_000, q + 6_400_000) for q in range(45_000_000, 54_000_000, 500_000)]
+    rows += [(45_100_000 + i * 700_000, 45_150_000 + i * 700_000, True, "Y", 2_000_000 + i * 3_000_000,
+              2_050_000 + i * 3_000_000) for i in range(12)]
+    p = calls.project(aln(rows), 45_000_000, 54_000_000)
+    assert p["target"] == "Y"
+    assert 50_500_000 <= p["lo"] and p["hi"] <= 60_500_000
+
+
+def test_synteny_true_for_homoeologous_segment_false_for_transposed_copy():
+    chain = [(q, q + 90_000, True, "Y", q, q + 90_000) for q in range(0, 3_000_000, 100_000)]
+    a = aln(chain)
+    ok, _ = calls.syntenic(a, 1_000_000, 1_200_000, 1_000_000, 1_200_000)
+    assert ok is True
+    # segment whose only alignment is to a distant place on another chromosome
+    b = aln([r for r in chain if not (1_000_000 <= r[0] < 1_200_000)] +
+            [(1_000_000, 1_190_000, True, "Z", 40_000_000, 40_190_000)])
+    ok, tgt = calls.syntenic(b, 1_000_000, 1_200_000, 1_000_000, 1_200_000)
+    assert ok is False and tgt.startswith("Z:")
