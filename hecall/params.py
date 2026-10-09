@@ -65,6 +65,12 @@ EM_TOL = 1e-4
 EM_MAX_ITER = 30
 PROFILE_ROUNDS = 3
 
+# Multi-scale proposals: extra segmentations with window evidence divided by sqrt(tau) and tau
+# (integrated autocorrelation time of native-window evidence), when that factor is >= MIN_TEMPER
+# (below it, tempering changes little). Raw segmentation shatters long exchanges whose windows are
+# serially correlated (Saccharum chr02S, 2026-10-08); all scales are scored identically.
+MIN_TEMPER = 2.0
+
 # --- calls -------------------------------------------------------------------------------------
 # PASS threshold: QUAL 20 = posterior 0.99 (conventional evidence level).
 QUAL_PASS = 20.0

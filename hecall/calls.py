@@ -168,11 +168,9 @@ def calibrate(he, rho, rho_ac, span, S):
 
 
 # ----------------------------------------------------------------------------- main
-def make_calls(mchroms, chroms, labels, fit, wins, slogp, data, gaps, work, ref_sources, log):
-    S = len(labels)
-    inull = IdentityNull(chroms, data)
+def _segments(mchroms, chroms, wins, posts, binned_list, slogp):
     segs = {}
-    for m, c, w, post, binned in zip(mchroms, chroms, wins, fit["post"], fit["binned"]):
+    for m, c, w, post, binned in zip(mchroms, chroms, wins, posts, binned_list):
         sg = model.segments(m, w, post, binned, slogp)
         if not sg:
             L = c["length"]
@@ -181,21 +179,13 @@ def make_calls(mchroms, chroms, labels, fit, wins, slogp, data, gaps, work, ref_
                    "bp_left": (0, 0, 0, 0), "bp_right": (L, L, L, L),
                    "terminal_left": True, "terminal_right": True}]
         segs[c["name"]] = sg
+    return segs
 
-    log("calls: synteny and homoeologue checks", detail=True)
-    ref_aln = {s: extract.load_aln(work, s) for s in ref_sources}
-    ss_aln = {lab: extract.load_aln(work, f"ss_{lab}") for lab in labels}
-    name2chrom = {c["name"]: c for c in chroms}
 
-    # genome-wide homoeologue divergence per (label, other label)
-    base = {}
-    for s_i in range(S):
-        for t_i in range(S):
-            if s_i != t_i:
-                num = sum(int(data[c["name"]]["ss_mm"][t_i].sum()) for c in chroms if c["label_idx"] == s_i)
-                den = sum(int(data[c["name"]]["ss_cov"][t_i].sum()) for c in chroms if c["label_idx"] == s_i)
-                base[(s_i, t_i)] = num / den if den else float("nan")
-
+def _candidates(segs, homsegs, scale, ctx):
+    """Non-native segments of one segmentation scale -> candidate HE records with evidence.
+    homsegs: the fine-scale segmentation, used to type the homoeologue's origin."""
+    (mchroms, chroms, labels, slogp, gaps, work, ref_sources, ref_aln, ss_aln, inull, base, name2chrom) = ctx
     he = []
     for m, c in zip(mchroms, chroms):
         s_i = c["label_idx"]
@@ -226,7 +216,7 @@ def make_calls(mchroms, chroms, labels, fit, wins, slogp, data, gaps, work, ref_
             if pr is not None and pr["bp"] >= PR.HOMOEOLOG_MIN_COVER * (b - a):
                 y, ylo, yhi = pr["target"], pr["lo"], pr["hi"]
                 hom_loc = f"{y}:{ylo}-{yhi}"
-                ysegs = segs.get(y)
+                ysegs = homsegs.get(y)
                 if ysegs is not None and name2chrom[y]["label_idx"] == t_i:
                     bp_s = bp_t = 0
                     for ys in ysegs:
@@ -249,40 +239,107 @@ def make_calls(mchroms, chroms, labels, fit, wins, slogp, data, gaps, work, ref_
                 flags.append("terminal")
             ss_d = ssm / ssc if ssc else float("nan")
             p_id = inull.p(s_i, t_i, b - a, ss_d, ssc) if hom_type == "non-reciprocal" and ssc else 1.0
-            he.append({"label_idx": s_i, "donor_idx": t_i, "p_identity": p_id,
-                "chrom": c["name"], "label": labels[s_i], "donor": labels[t_i],
-                "start": a, "end": b, "length": b - a, "n_windows": seg["win_b"] - seg["win_a"],
-                "bp_left_ci": "terminal" if seg["terminal_left"] else f"{seg['bp_left'][2]}-{seg['bp_left'][3]}",
-                "bp_right_ci": "terminal" if seg["terminal_right"] else f"{seg['bp_right'][2]}-{seg['bp_right'][3]}",
-                "qual": round(seg["qual"], 1), "post_mean": seg["post_mean"], "llr": seg["llr"],
-                "n_sites": int(sb - sa), "n_support": int((lr > 0).sum()), "n_against": int((lr < 0).sum()),
-                "closest_ref": best, "ref_div": [float(x) for x in div],
-                "syntenic": syn, "ref_target": tgt or "",
-                "homoeolog": hom_loc, "type": hom_type, "homoeolog_frac_recipient_origin": frac_s,
-                "ss_div": float(ssm / ssc) if ssc else float("nan"), "ss_cover": float(ssc / max(b - a, 1)),
-                "ss_div_baseline": base[(s_i, t_i)],
-                "flags": ",".join(flags) or "."})
+            he.append({"label_idx": s_i, "donor_idx": t_i, "p_identity": p_id, "scale": scale,
+                       "chrom": c["name"], "label": labels[s_i], "donor": labels[t_i],
+                       "start": a, "end": b, "length": b - a, "n_windows": seg["win_b"] - seg["win_a"],
+                       "bp_left_ci": "terminal" if seg["terminal_left"] else f"{seg['bp_left'][2]}-{seg['bp_left'][3]}",
+                       "bp_right_ci": "terminal" if seg["terminal_right"] else f"{seg['bp_right'][2]}-{seg['bp_right'][3]}",
+                       "qual": round(seg["qual"], 1), "post_mean": seg["post_mean"], "llr": seg["llr"],
+                       "n_sites": int(sb - sa), "n_support": int((lr > 0).sum()), "n_against": int((lr < 0).sum()),
+                       "closest_ref": best, "ref_div": [float(x) for x in div],
+                       "syntenic": syn, "ref_target": tgt or "",
+                       "homoeolog": hom_loc, "type": hom_type, "homoeolog_frac_recipient_origin": frac_s,
+                       "ss_div": float(ssm / ssc) if ssc else float("nan"), "ss_cover": float(ssc / max(b - a, 1)),
+                       "ss_div_baseline": base[(s_i, t_i)],
+                       "flags": ",".join(flags) or "."})
+    return he
 
-    # empirical-Bayes breakpoint rate: rate implied by the PASS calls, iterated to a fixed point
+
+def _filters(h, resolvable):
+    filt = []
+    if h["qual"] < PR.QUAL_PASS:
+        filt.append("LowQual")
+    if not resolvable[(h["label_idx"], h["donor_idx"])]:
+        filt.append("unresolvable_pair")
+    if h["syntenic"] == "nonsyntenic":
+        filt.append("nonsyntenic")
+    return ";".join(filt) or "PASS"
+
+
+def _select(cands):
+    """Non-overlapping calls from candidates of all scales.
+
+    Candidates passing every filter come first, longest first: when a long block and a fragment of
+    it both meet the evidence standard, the block describes the supported extent. The remaining
+    candidates follow by calibrated log-odds. Each call keeps, as its core, the best-scoring
+    candidate (any scale) of the same donor inside it."""
+    order = sorted(cands, key=lambda h: (h["filter"] != "PASS",
+                                         -h["length"] if h["filter"] == "PASS" else -h["log_odds"]))
+    taken, out = {}, []
+    for h in order:
+        iv = taken.setdefault(h["chrom"], [])
+        if any(h["start"] < e and h["end"] > s for s, e in iv):
+            continue
+        iv.append((h["start"], h["end"]))
+        out.append(h)
+    by_chrom = {}
+    for c in cands:
+        by_chrom.setdefault(c["chrom"], []).append(c)
+    for h in out:
+        inside = [c for c in by_chrom[h["chrom"]] if c["donor"] == h["donor"]
+                  and c["start"] >= h["start"] and c["end"] <= h["end"]]
+        core = max(inside, key=lambda c: c["log_odds"]) if inside else h
+        h["core"] = f"{core['start']}-{core['end']}"
+        h["core_qual"] = core["qual"]
+    return sorted(out, key=lambda h: (h["chrom"], h["start"]))
+
+
+def make_calls(mchroms, chroms, labels, fit, wins, slogp, data, gaps, work, ref_sources, log,
+               posts, rho_start=None, tables=None):
+    """Segmentations at one or more scales -> scored, non-overlapping HE calls.
+
+    posts: [(scale name, per-chromosome posteriors)]; the first is the fine (untempered) scale, whose
+    segments are returned for painting and used to type homoeologues. Returns (segs, he, res,
+    rho_cal, tables); `tables` (loaded alignment tables) can be passed back in to avoid reloading."""
+    S = len(labels)
+    inull = IdentityNull(chroms, data)
+    segs_by = [(name, _segments(mchroms, chroms, wins, p, fit["binned"], slogp)) for name, p in posts]
+    fine = segs_by[0][1]
+    log("calls: synteny and homoeologue checks", detail=True)
+    if tables is None:
+        tables = ({s: extract.load_aln(work, s) for s in ref_sources},
+                  {lab: extract.load_aln(work, f"ss_{lab}") for lab in labels})
+    ref_aln, ss_aln = tables
+    name2chrom = {c["name"]: c for c in chroms}
+    base = {}
+    for s_i in range(S):
+        for t_i in range(S):
+            if s_i != t_i:
+                num = sum(int(data[c["name"]]["ss_mm"][t_i].sum()) for c in chroms if c["label_idx"] == s_i)
+                den = sum(int(data[c["name"]]["ss_cov"][t_i].sum()) for c in chroms if c["label_idx"] == s_i)
+                base[(s_i, t_i)] = num / den if den else float("nan")
+    ctx = (mchroms, chroms, labels, slogp, gaps, work, ref_sources, ref_aln, ss_aln, inull, base, name2chrom)
+    cands = []
+    for name, sg in segs_by:
+        cands += _candidates(sg, fine, name, ctx)
+
+    # empirical-Bayes breakpoint rate: rate implied by the PASS calls, iterated to a fixed point.
+    # Several self-consistent rates can exist (a lenient prior lets more calls pass, which justify the
+    # lenient prior); starting from the lower bound reaches the smallest one, i.e. the most
+    # conservative rate the calls themselves support.
     span = {}
     for s_i in range(S):
         sp = [w["end"] - w["start"] for w in wins if w["label"] == s_i and w["end"].size]
         span[s_i] = float(np.median(np.concatenate(sp))) if sp else 1.0
     evaluated = float(sum((w["end"] - w["start"]).sum() for w in wins))
-    rho = fit["rho"]
-    for _ in range(50):
+    rho = rho_start if rho_start is not None else PR.RHO_MIN
+    for _ in range(200):
         res = model.resolution(fit, wins, S, rho, fit["rho_ac"])
         resolvable = {(r["recipient"], r["donor"]): r["resolvable"] for r in res}
-        calibrate(he, rho, fit["rho_ac"], span, S)
-        for h in he:
-            filt = []
-            if h["qual"] < PR.QUAL_PASS:
-                filt.append("LowQual")
-            if not resolvable[(h["label_idx"], h["donor_idx"])]:
-                filt.append("unresolvable_pair")
-            if h["syntenic"] == "nonsyntenic":
-                filt.append("nonsyntenic")
-            h["filter"] = ";".join(filt) or "PASS"
+        calibrate(cands, rho, fit["rho_ac"], span, S)
+        for h in cands:
+            h["filter"] = _filters(h, resolvable)
+        he = _select(cands)
         nbp = sum(int(h["bp_left_ci"] != "terminal") + int(h["bp_right_ci"] != "terminal")
                   for h in he if h["filter"] == "PASS")
         new = min(max(nbp / evaluated, PR.RHO_MIN), PR.RHO_MAX)
@@ -291,8 +348,10 @@ def make_calls(mchroms, chroms, labels, fit, wins, slogp, data, gaps, work, ref_
             break
         rho = new
     log(f"calls: calibrated breakpoint rate {rho:.3g}/bp; serial correlation tau(5 windows)="
-        f"{tau_n(fit['rho_ac'], 5):.1f}, tau(100)={tau_n(fit['rho_ac'], 100):.1f}")
-    return segs, he, res, rho
+        f"{tau_n(fit['rho_ac'], 5):.1f}, tau(100)={tau_n(fit['rho_ac'], 100):.1f}; "
+        + ", ".join(f"scale {n}: {sum(h['scale'] == n and h['filter'] == 'PASS' for h in he)} PASS"
+                    for n, _ in segs_by))
+    return fine, he, res, rho, tables
 
 
 def nocall_regions(chroms, wins, data, refs, min_len):

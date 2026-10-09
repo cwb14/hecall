@@ -223,6 +223,23 @@ def run(wins, S, verbose=None):
             "logL": logL, "assign": assign, "rho_ac": rho_ac}
 
 
+def tempered_posteriors(fit, wins, S, rho, temper):
+    """Posteriors with window evidence divided by `temper` and the breakpoint rate fixed at rho.
+
+    Used to propose candidates at coarser scales: with correlated windows the raw evidence of short
+    noisy runs inside a long exchange beats the switch cost and shatters it; tempered evidence
+    (temper ~ integrated autocorrelation time) lets long blocks stand. Scoring is unchanged."""
+    labels = np.array([w["label"] for w in wins], dtype=np.int64)
+    binned = [{"E": b["E"] / temper, "d": b["d"]} for b in fit["binned"]]
+    post, _, _, _ = forward_backward(binned, labels, fit["pi"], rho, S)
+    return post
+
+
+def integrated_tau(rho_ac):
+    """Integrated autocorrelation time of window evidence (truncated sequence from autocorrelation)."""
+    return max(1.0, 1.0 + 2.0 * float(rho_ac[1:].sum()))
+
+
 # ----------------------------------------------------------------------------- site profiles (breakpoints only)
 def site_profiles(chroms, S, n_pat):
     """log P(diagnostic-site pattern | state); used only to place cuts between windows."""

@@ -232,7 +232,21 @@ def run(subgenome_args, ref_args, outdir, threads=8, verbose=False, keep_work=Tr
     log(f"sites: {sum(m['site_pos'].size for m in mchroms):,} diagnostic sites place breakpoints")
 
     # ---- calls
-    segs, he, res, rho_c = calls.make_calls(mchroms, chroms, labels, fit, wins, slogp, data, gaps, work, ref_sources, log)
+    # candidates are proposed at several scales (raw evidence; evidence tempered by sqrt(tau) and by
+    # tau, the integrated autocorrelation time of native windows) and all are scored the same way:
+    # raw segmentation finds small exchanges, tempered segmentation keeps long noisy blocks whole
+    segs, he, res, rho_c, tables = calls.make_calls(mchroms, chroms, labels, fit, wins, slogp, data, gaps,
+                                                    work, ref_sources, log, posts=[("x1", fit["post"])])
+    tau_g = model.integrated_tau(fit["rho_ac"])
+    temps = sorted({round(t, 1) for t in (math.sqrt(tau_g), tau_g) if t >= PR.MIN_TEMPER})
+    if temps:
+        posts = [("x1", fit["post"])] + [(f"x{t:g}", model.tempered_posteriors(fit, wins, S, rho_c, t))
+                                         for t in temps]
+        log(f"calls: multi-scale proposals (evidence / {', '.join(f'{t:g}' for t in temps)}; tau={tau_g:.1f})",
+            detail=True)
+        segs, he, res, rho_c, tables = calls.make_calls(mchroms, chroms, labels, fit, wins, slogp, data, gaps,
+                                                        work, ref_sources, log, posts=posts,
+                                                        tables=tables)
     fit["rho_cal"] = rho_c
     log("model: " + "; ".join(f"{labels[r['donor']]}->{labels[r['recipient']]} min HE {output.fmt_bp(r['min_he_bp'])}"
                              + ("" if r["resolvable"] else " (unresolvable)") for r in res))

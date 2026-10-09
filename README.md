@@ -84,6 +84,11 @@ Reruns resume from checkpoints in `out/work/`.
     intergenomic exchange between non-homoeologous sites, such as the tobacco Nt21/Nt22
     translocation
   - `nonsyntenic`
+- **`core`, `core_qual`**: the most concentrated well-supported stretch inside the call. Long
+  exchanges are reported whole; `core` gives where the evidence peaks.
+- **`scale`**: the segmentation that proposed the call:
+  - `x1`: raw window evidence, which finds small exchanges
+  - `xN`: window evidence divided by N, which keeps long exchanges with noisy windows whole
 - **`llr`, `tau_n`, `n_windows`**: summed window evidence, its serial-correlation discount, and the
   number of windows.
 - **`n_sites`, `n_support`, `n_against`**: diagnostic sites inside the segment and how many favour

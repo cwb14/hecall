@@ -33,8 +33,8 @@ def write_all(outdir, labels, refs, chroms, segs, he, nocall, chrom_rows, fit, w
               pattern_names, data):
     rnames = [r[0] for r in refs]
     S = len(labels)
-    cols = ["chrom", "start", "end", "length", "label", "donor", "qual", "filter", "type", "llr", "tau_n",
-            "p_identity", "log_odds", "n_windows", "n_sites", "n_support", "n_against", "bp_left_ci", "bp_right_ci",
+    cols = ["chrom", "start", "end", "length", "label", "donor", "qual", "filter", "type", "core", "core_qual",
+            "scale", "llr", "tau_n", "p_identity", "log_odds", "n_windows", "n_sites", "n_support", "n_against", "bp_left_ci", "bp_right_ci",
             "syntenic", "closest_ref", "ref_target"] + [f"div_{n}" for n in rnames] + \
            ["homoeolog", "homoeolog_frac_recipient_origin", "ss_div", "ss_div_baseline", "ss_cover", "flags"]
     with open(os.path.join(outdir, "he.tsv"), "w") as fh:

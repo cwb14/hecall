@@ -183,6 +183,21 @@ Output (one directory per polyploid):
   - Context classes (conditioning on closest-reference divergence) were tried and dropped: with a
     stand-in reference the class becomes confounded with origin (synthetic stand-in test failed).
   - The window model learned from the polyploid's own subgenomes replaced it.
+- 2026-10-08 v0.3.8: multi-scale proposals.
+  - Segmentation runs with window evidence divided by 1, sqrt(tau) and tau, where tau is the
+    integrated autocorrelation time of native-window evidence. All scales are scored identically
+    (llr / tau_n + breakpoint prior).
+  - Selection: PASS candidates longest first (the full supported extent), then the rest by
+    log-odds; no overlaps. Each call keeps its best-scoring core.
+  - The empirical-Bayes breakpoint rate now starts from the lower bound, so it converges to the
+    smallest self-consistent rate.
+  - Why: Saccharum chr02S's O-derived block (66–97 Mb; published So ~82–95) was shattered into
+    failing fragments at raw scale (only 2 Mb PASS), because 30% of its windows look S-like in
+    ~100-kb runs. Now it is called whole (QUAL 24, core 71–73 Mb at QUAL 31).
+  - Regression checks:
+    - A. suecica chr1 swap is unchanged; chr01Ar is now one block, and the small weak calls are gone.
+    - Actinidia: 318 -> 199 PASS. The calls look donor-like (donor-ref divergence 0.7% vs native
+      0.9%).
 - 2026-10-08 v0.3.5: synteny check has three classes:
   - `homoeologous`
   - `translocation`: one collinear chain on another chromosome or position, spanning at least half
