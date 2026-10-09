@@ -210,6 +210,32 @@ Output (one directory per polyploid):
   - Output is the same up to tie-breaks among equal-scoring chains: 0.06% of aligned bp differ on
     Coffea, all between tandem copies.
   - Regression test: 15,000 alignments ending at one target base (upstream > 120 s; patched < 1 s).
+- 2026-10-09 v0.4.0: each state's emission density is learned from native windows only.
+  - Before: in each round, the density of state s was fitted on every window assigned to s,
+    including windows on other subgenomes' chromosomes. Those windows are the candidate exchanges
+    being tested, so they were used both to train and to test.
+  - Failure: windows about equally far from all references (repeats aligned to paralogues) sit midway
+    on the origin axis. On Digitaria 4x, chr04D 21.7–25.9 Mb is 13.3% from the D reference and 13.9%
+    from E. In round 0 these went to whichever state had the heavier tail (E). E's density then grew
+    there, and the block ended at posterior E = 1.0 (segments.bed QUAL 31; 10% of chr04D listed as E).
+  - Now: s's density uses windows on s-labelled chromosomes that are currently assigned to s. The
+    labelled subgenomes are the training set; candidate exchanges are only tested.
+  - Effect, from refitting the model on each batch run's windows (% of window bp confidently foreign:
+    all / windows whose closest reference is within 20% of the second closest):
+
+    | polyploid | before | after |
+    |---|---|---|
+    | Digitaria 4x | 1.56 / 18.3 | 1.05 / 10.2 (chr04D block: own-origin posterior 0.00 -> 0.80) |
+    | Poa annua | 0.66 / 10.1 | 0.56 / 6.2 |
+    | B. napus | 1.90 / 7.1 | 1.83 / 6.5 |
+    | GR-A3n | 15.6 / 30.1 | 14.9 / 29.4 |
+    | A. suecica, O. minuta, Musa Plantain, Musa Silk, Coffea, Magallana, Actinidia | unchanged (±0.1) | |
+
+  - All validated exchanges are kept: A. suecica chr1 swap, O. minuta chr1 swap, Musa Plantain 6/6,
+    Musa Silk 4/4, Saccharum chr02S, Poa chr07B, Digitaria chr08D.
+  - Not changed: a no-re-estimation variant (labels only) lowers foreign painting further, but every
+    real exchange then also enters its recipient's density, which costs power in exchange-rich
+    genomes (Actinidia, 16%).
 - 2026-10-08 v0.3.5: synteny check has three classes:
   - `homoeologous`
   - `translocation`: one collinear chain on another chromosome or position, spanning at least half

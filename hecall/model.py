@@ -188,7 +188,12 @@ def tau_n(rho, n):
 
 def run(wins, S, verbose=None):
     """wins: per chromosome dict(label, X (n, d) features, d (n,) distances). Rounds: fit KDEs on
-    windows assigned to each state (start: chromosome labels) -> HMM -> reassign -> repeat.
+    native windows of each state -> HMM -> reassign -> repeat.
+
+    A state's density is learned only from windows on chromosomes labelled with that state and
+    currently assigned to it (start: all of them). Windows assigned to s on other subgenomes'
+    chromosomes are the candidate exchanges being tested; letting them shape s's density made it
+    absorb ambiguous windows (equidistant from all references) round after round (v0.4.0).
     The HMM proposes segments; their evidence is calibrated for serial correlation afterwards
     (calls.py), using the autocorrelation of window evidence in native windows returned here."""
     labels = np.array([w["label"] for w in wins], dtype=np.int64)
@@ -196,10 +201,11 @@ def run(wins, S, verbose=None):
     lo = np.quantile(Xall, PR.KDE_RANGE_Q, axis=0) - PR.KDE_PAD
     hi = np.quantile(Xall, 1 - PR.KDE_RANGE_Q, axis=0) + PR.KDE_PAD
     assign = [np.full(w["X"].shape[0], w["label"], dtype=np.int64) for w in wins]
+    L = np.concatenate(assign)
     rho, prev, kdes = PR.RHO_INIT, None, None
     for r in range(PR.PROFILE_ROUNDS + 1):
         A = np.concatenate(assign)
-        kdes = [KDE(Xall[A == s], lo, hi) for s in range(S)]
+        kdes = [KDE(Xall[(A == s) & (L == s)], lo, hi) for s in range(S)]
         raw = [np.column_stack([k.logpdf(w["X"]) for k in kdes]) if w["X"].shape[0] else np.zeros((0, S))
                for w in wins]
         series = []

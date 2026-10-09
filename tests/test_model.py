@@ -72,3 +72,17 @@ def test_tau_n_grows_with_segment_length_under_correlation():
     assert model.tau_n(rho, 1) == 1.0
     assert 1.0 < model.tau_n(rho, 5) < model.tau_n(rho, 100)
     assert model.tau_n(np.r_[1.0, np.zeros(10)], 50) == 1.0
+
+
+def test_state_density_learned_from_native_windows_only():
+    """Windows assigned to state 1 on a state-0 chromosome (candidate exchanges) must not shape
+    state 1's density; otherwise ambiguous windows get absorbed round after round (v0.4.0)."""
+    rng = np.random.default_rng(4)
+    w0 = sim(0, 2000, rng, foreign=[(500, 700, 1)])
+    w0["X"][500:700, 0] = rng.normal(-0.4, 0.05, 200)   # ambiguous block, nearer state 1's tail
+    w1 = sim(1, 2000, rng)
+    fit = model.run([w0, w1], 2)
+    native1 = w1["X"][fit["assign"][1] == 1]
+    ref = model.KDE(native1, fit["lo"], fit["hi"])
+    grid = np.linspace(-3, 3, 61)[:, None]
+    assert np.allclose(fit["kdes"][1].logpdf(grid), ref.logpdf(grid))
