@@ -8,7 +8,8 @@ import math
 import os
 import shutil
 import time
-from multiprocessing import Pool
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
 
 import numpy as np
 
@@ -70,6 +71,18 @@ def _extract_worker(job):
     chain, source, chrom_len, workdir, tools, threads, target_set, swap, tag = job
     extract.extract_source(chain, source, chrom_len, workdir, tools, threads, target_set, swap, tag)
     return tag or source
+
+
+def _parallel(fn, jobs, workers, stage):
+    """Run fn over jobs in worker processes, yielding results as they finish. A worker that raises
+    or dies (e.g. killed for memory) stops the run with an explained error instead of hanging."""
+    try:
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+            futs = [ex.submit(fn, j) for j in jobs]
+            for f in as_completed(futs):
+                yield f.result()
+    except BrokenProcessPool:
+        raise HecallError(f"hecall: a {stage} worker process died (out of memory?); rerun to resume")
 
 
 # ----------------------------------------------------------------------------- main
@@ -154,9 +167,8 @@ def run(subgenome_args, ref_args, outdir, threads=8, verbose=False, keep_work=Tr
             jobs.append((ch, f"ss_{labels[j]}", cl_i, work, tools, 2, None, False, f"ss_{labels[j]}.from_{labels[i]}"))
             jobs.append((ch, f"ss_{labels[i]}", cl_j, work, tools, 2, None, True, f"ss_{labels[i]}.from_{labels[j]}"))
     log("extract: per-base comparison with each reference and homoeologue")
-    with Pool(min(threads, len(jobs))) as pool:
-        for src in pool.imap_unordered(_extract_worker, jobs):
-            log(f"  extracted {src}", detail=True)
+    for src in _parallel(_extract_worker, jobs, min(threads, len(jobs)), "extract"):
+        log(f"  extracted {src}", detail=True)
 
     # ---- sites
     os.makedirs(os.path.join(work, "sites"), exist_ok=True)
@@ -166,9 +178,8 @@ def run(subgenome_args, ref_args, outdir, threads=8, verbose=False, keep_work=Tr
         sjobs.append((work, c, ref_sources, ss))
     log("sites: informative sites per chromosome")
     sj = sorted(sjobs, key=lambda j: -j[1]["length"])
-    with Pool(max(1, min(threads, len(sj)))) as pool:
-        for f in pool.imap_unordered(_sites_worker, sj):
-            pass
+    for _ in _parallel(_sites_worker, sj, max(1, min(threads, len(sj))), "sites"):
+        pass
     data = {c["name"]: dict(np.load(os.path.join(work, "sites", f"{c['name']}.npz"))) for c in chroms}
 
     # ---- windows
