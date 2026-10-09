@@ -198,6 +198,18 @@ Output (one directory per polyploid):
     - A. suecica chr1 swap is unchanged; chr01Ar is now one block, and the small weak calls are gone.
     - Actinidia: 318 -> 199 PASS. The calls look donor-like (donor-ref divergence 0.7% vs native
       0.9%).
+- 2026-10-09 v0.3.9: tie-safe ALNchain (speed only).
+  - Upstream ALNchain builds a KD-tree per scaffold pair by quickselect with a two-way partition.
+    When thousands of alignments share an end coordinate, every partition step removes one element,
+    and the build becomes quadratic or worse.
+  - Digitaria sanguinalis 6x C vs E: 79,597 prefiltered alignments end at chr02E:36,854,183, a
+    repeat array cut by a contig edge. ALNchain ran > 80 min on a 28-MB input.
+  - Fix: csrc/alnchain_ties.patch (three-way partition: equal keys form a middle block), built by
+    csrc/build.sh into bin/ALNchain and preferred by find_tools. Digitaria: 1.2 s. Coffea
+    polyploid vs C. canephora: 23 s -> 4 s.
+  - Output is the same up to tie-breaks among equal-scoring chains: 0.06% of aligned bp differ on
+    Coffea, all between tandem copies.
+  - Regression test: 15,000 alignments ending at one target base (upstream > 120 s; patched < 1 s).
 - 2026-10-08 v0.3.5: synteny check has three classes:
   - `homoeologous`
   - `translocation`: one collinear chain on another chromosome or position, spanning at least half

@@ -21,9 +21,12 @@ hecall also says where it cannot tell.
 - **Software:**
   - FastGA suite on PATH (or `HECALL_FASTGA=/path/to/FASTGA`)
   - Python ≥ 3.9 with numpy, scipy, pandas and matplotlib
-- **Recommended for multi-Gb genomes:** build the small `alnfilter` helper against the FASTGA
-  source tree: `bash csrc/build.sh /path/to/FASTGA`, which writes `bin/alnfilter`.
-  - Without it, hecall falls back to a slower PAF round trip.
+- **Recommended:** build hecall's two C helpers against the FASTGA source tree:
+  `bash csrc/build.sh /path/to/FASTGA`. It writes:
+  - `bin/alnfilter`. Without it, hecall falls back to a slower PAF round trip.
+  - `bin/ALNchain`, the upstream ALNchain with a small speed fix (`csrc/alnchain_ties.patch`).
+    Upstream ALNchain can run for hours when thousands of repeat alignments end at the same base,
+    e.g. at a contig edge.
 
 ## How it works (one paragraph)
 
