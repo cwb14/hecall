@@ -366,6 +366,9 @@ def make_calls(mchroms, chroms, labels, fit, wins, slogp, data, gaps, work, ref_
     rho = rho_start if rho_start is not None else PR.RHO_MIN
     for _ in range(200):
         res = model.resolution(fit, wins, S, rho, fit["rho_ac"])
+        if fit.get("no_contrast"):
+            for r in res:
+                r["resolvable"] = False
         resolvable = {(r["recipient"], r["donor"]): r["resolvable"] for r in res}
         calibrate(cands, rho, fit["rho_ac"], span, S)
         for h in cands:

@@ -1,8 +1,8 @@
 """Equal-information windows along each polyploid chromosome.
 
 A window grows over consecutive 1-kb blocks until every reference has at least `cmin` compared
-bases, where cmin gives ~WINDOW_MISMATCHES expected mismatches to the closest reference at this
-genome's typical divergence. Windows are therefore short where alignments are dense and divergence
+bases, where cmin separates native from homoeologous origin at this genome's typical divergences
+(params.WINDOW_Z2). Windows are therefore short where alignments are dense and divergence
 high (fine resolution) and long where they are sparse; a window that would have to span more than
 WINDOW_MAX_FACTOR x the median span is not formed (region not evaluable).
 """
@@ -12,25 +12,44 @@ from . import params as PR
 
 
 def typical_closest_divergence(data):
-    """Median over blocks of the divergence to the closest reference (all subgenomes).
+    """Median over blocks of the divergence to the closest reference (all subgenomes)."""
+    return _typical(data, "cov", "mm")
 
-    Blocks start at 10 kb and double while the median is zero: a median of ratios is only
-    meaningful when blocks hold mismatches, and when the references are the actual parents (e.g. a
-    synthetic polyploid) most 10-kb blocks hold none (v0.4.7, Avena magna x longiglumis)."""
+
+def typical_homoeolog_divergence(data):
+    """Median over blocks of the divergence to the closest homoeologue (other subgenome)."""
+    return _typical(data, "ss_cov", "ss_mm")
+
+
+def window_compared_bases(d1, dh):
+    """Compared bases per reference so that native and homoeologous origin differ by sqrt(WINDOW_Z2)
+    Poisson SDs; None when the homoeologues are no farther apart than the closest reference is
+    (origin cannot be told apart)."""
+    if not (dh > d1 >= 0):
+        return None
+    return int(np.ceil(PR.WINDOW_Z2 * (d1 + dh) / (dh - d1) ** 2))
+
+
+def _typical(data, ck, mk):
+    """Median of block divergences to the closest source. Blocks start at 10 kb and double while
+    the median is zero: a median of ratios needs blocks that hold mismatches (references that are
+    the parents leave most 10-kb blocks without one; v0.4.7). 0.0 if no block ever holds one; nan
+    if nothing is compared."""
     g = max(1, 10_000 // PR.BIN_BP)
-    longest = max((d["cov"].shape[1] for d in data.values()), default=0)
+    longest = max((d[ck].shape[1] for d in data.values()), default=0)
+    med = float("nan")
     while g <= longest:
-        med = _block_median(data, g)
-        if not med == 0:          # positive, or nan when no block is long enough
+        med = _block_median(data, g, ck, mk)
+        if not med == 0:
             return med
         g *= 2
-    return float("nan")
+    return med
 
 
-def _block_median(data, g):
+def _block_median(data, g, ck="cov", mk="mm"):
     vals = []
     for d in data.values():
-        cov, mm = d["cov"], d["mm"]
+        cov, mm = d[ck], d[mk]
         nb = cov.shape[1]
         n = nb // g * g
         if n == 0:

@@ -286,6 +286,25 @@ Output (one directory per polyploid):
     blocks hold no mismatch to the closest reference. The median was 0 and the run stopped with
     "nothing to tell apart", which is the opposite of the truth.
   - No other genome changes (all have a non-zero 10-kb median), so v0.4.6 outputs equal v0.4.7.
+- 2026-10-09 v0.4.8: window size from the native-vs-homoeologous contrast.
+  - Before: ~10 expected mismatches to the closest reference. Windows were huge when the references
+    are the parents (Avena magna x longiglumis: d1 = 1.6e-6, 29-Mb windows) or very close to them
+    (A. hypogaea: 80-kb windows). Those are the cases where origin is clearest.
+  - Now: c = WINDOW_Z2 (d1 + dh) / (dh - d1)^2 compared bases per reference. d1 is the typical
+    closest-reference divergence; dh is the typical divergence between the polyploid's own
+    homoeologues (an exchanged segment sits ~dh from its native reference). Native and foreign
+    windows then differ by ~3.2 Poisson SDs at typical divergences.
+  - Label-free: a second-nearest-reference version failed with several references per subgenome
+    (sister references), so the homoeologue divergence is used instead.
+  - Effect (compared bases per window, old -> new):
+    - finer where the references are close: Avena magna 6.4M -> 225, A. hypogaea 33,324 -> 191,
+      Poa 2,564 -> 188, Brachypodium 2,271 -> 162
+    - coarser where subgenomes are barely farther apart than the references: Magallana 523 -> 10,288,
+      Avena agadiriana 280 -> 9,336, Actinidia 660 -> 3,942, Saccharum 463 -> 2,801
+    - little change for most others (1-kb block floor)
+  - Validated swaps are unchanged offline (A. suecica, O. minuta, Musa Plantain, Fragaria).
+  - dh <= d1 (Rosa haplotypes: 0.22% between, 0.51% to the references): origin cannot be told apart.
+    Windows fall back to the closest-reference rule for painting, and every pair is unresolvable.
 - 2026-10-08 v0.3.5: synteny check has three classes:
   - `homoeologous`
   - `translocation`: one collinear chain on another chromosome or position, spanning at least half

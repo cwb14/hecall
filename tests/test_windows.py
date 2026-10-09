@@ -30,3 +30,13 @@ def test_typical_divergence_when_references_are_the_parents():
     mm[0, rng.choice(nb, 40, replace=False)] = 1  # closest reference: ~2e-5
     d = windows.typical_closest_divergence({"c": {"cov": cov, "mm": mm}})
     assert 0 < d < 1e-4
+
+
+def test_window_size_from_native_vs_homoeologous_contrast():
+    """c = Z2 (d1 + dh) / (dh - d1)^2: references equal to the parents (d1 = 0) give small windows;
+    homoeologues no farther apart than the references give none (origin cannot be told apart)."""
+    from hecall import params as PR
+    assert windows.window_compared_bases(0.0, 0.05) == int(np.ceil(PR.WINDOW_Z2 / 0.05))
+    assert windows.window_compared_bases(0.01, 0.05) < windows.window_compared_bases(0.03, 0.05)
+    assert windows.window_compared_bases(0.05, 0.05) is None
+    assert windows.window_compared_bases(0.006, 0.002) is None

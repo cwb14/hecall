@@ -188,9 +188,15 @@ def run(subgenome_args, ref_args, outdir, threads=8, verbose=False, keep_work=Tr
 
     # ---- windows
     dtyp = windows.typical_closest_divergence(data)
-    if not dtyp > 0:
-        raise HecallError("hecall: no divergence between the polyploid and its closest references; nothing to tell apart")
-    cmin = int(math.ceil(PR.WINDOW_MISMATCHES / dtyp))
+    dhom = windows.typical_homoeolog_divergence(data)
+    if not (dtyp >= 0 and dhom >= 0):
+        raise HecallError("hecall: references or homoeologues do not align to the polyploid; nothing to compare")
+    cmin = windows.window_compared_bases(dtyp, dhom)
+    no_contrast = cmin is None
+    if no_contrast:   # still paint and report, but nothing can be called
+        log(f"windows: WARNING: the subgenomes are closer to each other ({100 * dhom:.2g}%) than to the closest "
+            f"reference ({100 * dtyp:.2g}%); origin cannot be told apart, every pair is unresolvable")
+        cmin = int(math.ceil(PR.WINDOW_Z2 / max(dtyp, 1e-6)))
     span0 = [np.diff(np.vstack(windows.build(data[c["name"]]["cov"], data[c["name"]]["mm"], cmin, 1 << 60)), axis=0)[0]
              for c in chroms]
     span0 = np.concatenate(span0)
@@ -214,12 +220,13 @@ def run(subgenome_args, ref_args, outdir, threads=8, verbose=False, keep_work=Tr
     proj = model.lda(Xall, np.concatenate([np.full(w["start"].size, w["label"]) for w in wins]), S)
     for w in wins:
         w["X"] = w["Xraw"] @ proj
-    log(f"windows: {nwin:,} windows of ~{PR.WINDOW_MISMATCHES} expected mismatches to the closest reference "
-        f"(typical divergence {100 * dtyp:.2g}%, >= {cmin:,} compared bases per reference; median span "
+    log(f"windows: {nwin:,} windows (typical divergence {100 * dtyp:.2g}% to the closest reference, "
+        f"{100 * dhom:.2g}% between homoeologues; >= {cmin:,} compared bases per reference; median span "
         f"{output.fmt_bp(np.median(span0) * PR.BIN_BP)}); {proj.shape[1]}-dimensional origin space")
 
     # ---- model
     fit = model.run(wins, S, verbose=lambda m: log(m, detail=True))
+    fit["no_contrast"] = no_contrast
     log(f"model: segmentation breakpoint rate {fit['rho']:.3g}/bp")
     allkeys = np.unique(np.concatenate([d["key"] for d in data.values()]))
     mchroms = []

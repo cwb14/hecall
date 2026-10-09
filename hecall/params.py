@@ -27,11 +27,13 @@ PREFILTER_MIN_BP = 5_000
 # Per-base comparisons are summed in blocks of this size; windows are built from whole blocks.
 BIN_BP = 1000
 
-# Information per window: enough compared bases that ~10 mismatches to the closest reference are
-# expected at this genome's typical divergence (Poisson CV ~0.3, so a window's log-divergence
-# ratio has SE ~0.3-0.45, small against the separation between origins). Set by statistics, not by
-# any genome.
-WINDOW_MISMATCHES = 10
+# Information per window: enough compared bases c that native-origin and other-origin sequence are
+# expected to differ by sqrt(WINDOW_Z2) ~ 3.2 Poisson SDs in mismatch count against the native
+# reference: c = WINDOW_Z2 (d1 + dh) / (dh - d1)^2, with d1 the typical divergence to the closest
+# reference and dh the typical divergence between the polyploid's homoeologues (an exchanged segment
+# sits ~dh from its native reference). Set by statistics, not by any genome (v0.4.8; before:
+# ~10 mismatches to the closest reference, which fails when the references are the parents).
+WINDOW_Z2 = 10
 
 # A window that would need more than this multiple of the median window span to collect its
 # information is not formed: the region is too sparsely aligned to be evaluated at the genome's
