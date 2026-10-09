@@ -102,6 +102,14 @@ scored with:
   - `gap_at_breakpoint`: an assembly gap lies inside a breakpoint CI. This may be a misjoin, which
     looks like a reciprocal exchange.
   - `terminal`
+  - `homoeolog_not_closer` (v0.4.1): non-reciprocal, the donor homoeologue covers >= 25% of the
+    segment, and its divergence from the segment is >= the genome-wide divergence between those
+    subgenomes. It is an evidence flag, not a filter: the donor copy may be absent from the assembly.
+    - In validated complexes, non-reciprocal PASS calls are much closer to their donor homoeologue
+      than the baseline. Median ratio: Musa 0.01, Arachis 0.01, Nicotiana 0.02, Coffea 0.05,
+      B. napus 0.20.
+    - Reciprocal swaps sit near 1, as expected.
+    - Sphagnum troendelagicum non-reciprocal calls: median 1.04 (10/18 >= 1). Actinidia: 22/136 >= 1.
 - `label_conflict` appears in chromosomes.tsv.
 - `nocall.bed`: stretches covered by no window, at least one median window span long. The reason
   is `no_alignment` or `sparse_alignment(<refs>)`.

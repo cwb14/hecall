@@ -238,6 +238,12 @@ def _candidates(segs, homsegs, scale, ctx):
             if seg["terminal_left"] or seg["terminal_right"]:
                 flags.append("terminal")
             ss_d = ssm / ssc if ssc else float("nan")
+            # a non-reciprocal exchange copies the donor homoeologue, so the two should be closer than
+            # homoeologues are genome-wide; if not, the reference signal has another source (a copy
+            # missing from the assembly, a stand-in reference, paralogy)
+            if (hom_type == "non-reciprocal" and ssc >= PR.HOMOEOLOG_MIN_COVER * (b - a)
+                    and ss_d >= base[(s_i, t_i)]):
+                flags.append("homoeolog_not_closer")
             p_id = inull.p(s_i, t_i, b - a, ss_d, ssc) if hom_type == "non-reciprocal" and ssc else 1.0
             he.append({"label_idx": s_i, "donor_idx": t_i, "p_identity": p_id, "scale": scale,
                        "chrom": c["name"], "label": labels[s_i], "donor": labels[t_i],

@@ -37,6 +37,8 @@ def test_planted_exchanges_types_and_decoy(tmp_path):
     assert len(passed) == len(truth)                       # decoy and clean chromosome: no calls
     types = {(c["chrom"], int(c["start"]) // 10000): c["type"] for c in passed}
     assert types[("pA_chr1", 9)] == "non-reciprocal"
+    flags = {(c["chrom"], int(c["start"]) // 10000): c["flags"] for c in passed}
+    assert "homoeolog_not_closer" not in flags[("pA_chr1", 9)]   # a true copy of the donor homoeologue
     assert types[("pA_chr2", 19)] == "reciprocal"
     assert types[("pB_chr2", 20)] == "reciprocal"
     for f in ("painting.pdf", "painting.png", "segments.bed", "nocall.bed", "chromosomes.tsv", "resolution.tsv"):

@@ -103,6 +103,10 @@ Reruns resume from checkpoints in `out/work/`.
 - **`flags`**:
   - `gap_at_breakpoint`: an assembly gap lies within a breakpoint interval (a possible misjoin)
   - `terminal`: the segment reaches a chromosome end
+  - `homoeolog_not_closer`: a non-reciprocal call whose segment is no more similar to the
+    polyploid's own donor homoeologue than homoeologues are genome-wide. A copy of that homoeologue
+    should be much closer, so the reference signal may have another source: a donor copy missing
+    from the assembly (other homologues in a higher polyploid), a stand-in reference, or paralogy.
 
 ## Limits
 
