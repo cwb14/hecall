@@ -60,7 +60,7 @@ Reruns resume from checkpoints in `out/work/`.
 | `he.tsv`, `he.gff3` | every candidate HE: position, donor, QUAL, FILTER, type, evidence |
 | `segments.bed` | full origin painting of every chromosome |
 | `nocall.bed` | regions where an HE could not have been detected, and why |
-| `chromosomes.tsv` | per chromosome: % of each origin, % not evaluable, number of HEs, label conflicts |
+| `chromosomes.tsv` | per chromosome: % of each origin, % not evaluable, % aligned to each other subgenome (`pct_homoeolog_<label>`; low = no homoeologue in the assembly: LOH, aneuploidy, lost or unassembled arm), number of HEs, label conflicts |
 | `resolution.tsv` | per subgenome pair: evidence per window, window size, **smallest detectable HE**; serial correlation |
 | `profiles.tsv` | diagnostic-site pattern frequencies per subgenome (used to place breakpoints) |
 | `windows.tsv.gz` | every window: compared bases and divergence to each reference, origin axis, posterior |

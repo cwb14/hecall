@@ -251,7 +251,7 @@ def run(subgenome_args, ref_args, outdir, threads=8, verbose=False, keep_work=Tr
     log("model: " + "; ".join(f"{labels[r['donor']]}->{labels[r['recipient']]} min HE {output.fmt_bp(r['min_he_bp'])}"
                              + ("" if r["resolvable"] else " (unresolvable)") for r in res))
     nocall = calls.nocall_regions(chroms, wins, data, refs, np.median(span0) * PR.BIN_BP)
-    chrom_rows = calls.chromosome_summary(chroms, labels, segs, he, nocall)
+    chrom_rows = calls.chromosome_summary(chroms, labels, segs, he, nocall, data)
 
     # ---- outputs
     pattern_names = [sites.key_to_pattern(int(k), K) for k in allkeys]

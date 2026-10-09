@@ -111,6 +111,12 @@ scored with:
     - Reciprocal swaps sit near 1, as expected.
     - Sphagnum troendelagicum non-reciprocal calls: median 1.04 (10/18 >= 1). Actinidia: 22/136 >= 1.
 - `label_conflict` appears in chromosomes.tsv.
+- `pct_homoeolog_<label>` (v0.4.2) in chromosomes.tsv: % of the chromosome in collinear chains with
+  each other subgenome. Low cover means there is no homoeologue in the assembly, so no exchange can
+  be evaluated there (descriptive, no threshold). Causes include:
+  - LOH in trio-binned or collapsed assemblies (Cryptococcus AD: chr03A and chr08D absent)
+  - aneuploidy
+  - lost or unassembled arms
 - `nocall.bed`: stretches covered by no window, at least one median window span long. The reason
   is `no_alignment` or `sparse_alignment(<refs>)`.
 - Subgenome pairs the data cannot tell apart are `unresolvable`: their calls are never PASS.

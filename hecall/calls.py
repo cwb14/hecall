@@ -388,10 +388,17 @@ def nocall_regions(chroms, wins, data, refs, min_len):
     return out
 
 
-def chromosome_summary(chroms, labels, segs, he, nocall):
+def chromosome_summary(chroms, labels, segs, he, nocall, data):
+    """Per chromosome: origin composition, no-call share, PASS calls, and how much of it aligns
+    (collinear chains) to each other subgenome. Low homoeologue cover marks sequence with no
+    counterpart in the assembly: lost homoeologues (LOH in trio-binned or collapsed assemblies),
+    aneuploidy, rearranged or unassembled arms. No call can be made there."""
     rows = []
     for c in chroms:
         L = c["length"]
+        ssc = data[c["name"]]["ss_cov"]
+        hcov = {f"pct_homoeolog_{lab}": ("." if i == c["label_idx"] else round(100 * float(ssc[i].sum()) / L, 2))
+                for i, lab in enumerate(labels)}
         bp = np.zeros(len(labels))
         for s in segs[c["name"]]:
             if not s.get("nosites"):
@@ -401,7 +408,7 @@ def chromosome_summary(chroms, labels, segs, he, nocall):
         hp = [h for h in he if h["chrom"] == c["name"] and h["filter"] == "PASS"]
         rows.append({"chrom": c["name"], "label": c["label"], "length": L, "majority_origin": maj,
                      **{f"pct_{lab}": round(100 * bp[i] / L, 2) for i, lab in enumerate(labels)},
-                     "pct_nocall": round(100 * nc / L, 2),
+                     "pct_nocall": round(100 * nc / L, 2), **hcov,
                      "n_he_pass": len(hp), "he_bp_pass": sum(h["length"] for h in hp),
                      "label_conflict": maj not in (".", c["label"])})
     return rows

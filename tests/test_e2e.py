@@ -54,3 +54,19 @@ def test_stand_in_reference(tmp_path):
     calls = _calls(out)
     assert all(_match(calls, truth, tol=1500))
     assert sum(c["filter"] == "PASS" for c in calls) == len(truth)
+
+
+def test_missing_homoeologue_is_reported(tmp_path):
+    """A subgenome chromosome without its homoeologue (LOH, aneuploidy) is stated in chromosomes.tsv."""
+    synth.build(str(tmp_path))
+    d = str(tmp_path)
+    recs = open(f"{d}/polyB.fa").read().split(">")[1:]
+    with open(f"{d}/polyB_lost.fa", "w") as fh:
+        fh.write("".join(">" + r for r in recs if not r.startswith("pB_chr3")))
+    out = str(tmp_path / "out")
+    pipeline.run([f"A={d}/polyA.fa", f"B={d}/polyB_lost.fa"], [f"refA={d}/refA.fa", f"refB={d}/refB.fa"], out,
+                 threads=2)
+    rows = {r["chrom"]: r for r in csv.DictReader(open(os.path.join(out, "chromosomes.tsv")), delimiter="\t")}
+    assert float(rows["pA_chr3"]["pct_homoeolog_B"]) < 5
+    assert float(rows["pA_chr1"]["pct_homoeolog_B"]) > 80
+    assert rows["pA_chr1"]["pct_homoeolog_A"] == "."
