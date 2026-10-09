@@ -61,7 +61,7 @@ Reruns resume from checkpoints in `out/work/`.
 | `segments.bed` | full origin painting of every chromosome |
 | `nocall.bed` | regions where an HE could not have been detected, and why |
 | `chromosomes.tsv` | per chromosome: % of each origin, % not evaluable, % aligned to each other subgenome (`pct_homoeolog_<label>`; low = no homoeologue in the assembly: LOH, aneuploidy, lost or unassembled arm), number of HEs, label conflicts |
-| `resolution.tsv` | per subgenome pair: evidence per window, window size, **smallest detectable HE**; serial correlation |
+| `resolution.tsv` | per subgenome pair: evidence per window, window size, **smallest detectable HE**, genome-wide homoeologue SNV divergence (`ss_div_baseline`, reported even when there are no calls); serial correlation |
 | `profiles.tsv` | diagnostic-site pattern frequencies per subgenome (used to place breakpoints) |
 | `windows.tsv.gz` | every window: compared bases and divergence to each reference, origin axis, posterior |
 | `painting.pdf/.png` + `painting_legend.md` | chromosome painting with every PASS HE marked |

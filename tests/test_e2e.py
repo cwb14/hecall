@@ -43,6 +43,9 @@ def test_planted_exchanges_types_and_decoy(tmp_path):
     assert types[("pB_chr2", 20)] == "reciprocal"
     for f in ("painting.pdf", "painting.png", "segments.bed", "nocall.bed", "chromosomes.tsv", "resolution.tsv"):
         assert os.path.exists(os.path.join(out, f))
+    res = list(csv.DictReader((l for l in open(os.path.join(out, "resolution.tsv")) if not l.startswith("#")),
+                              delimiter="\t"))
+    assert all(0.03 < float(r["ss_div_baseline"]) < 0.15 for r in res)   # planted donor divergence 6%
 
 
 def test_stand_in_reference(tmp_path):

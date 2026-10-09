@@ -353,6 +353,8 @@ def make_calls(mchroms, chroms, labels, fit, wins, slogp, data, gaps, work, ref_
             rho = new
             break
         rho = new
+    for r in res:  # genome-wide homoeologue divergence, also when there are no calls
+        r["ss_div_baseline"] = base[(r["recipient"], r["donor"])]
     log(f"calls: calibrated breakpoint rate {rho:.3g}/bp; serial correlation tau(5 windows)="
         f"{tau_n(fit['rho_ac'], 5):.1f}, tau(100)={tau_n(fit['rho_ac'], 100):.1f}; "
         + ", ".join(f"scale {n}: {sum(h['scale'] == n and h['filter'] == 'PASS' for h in he)} PASS"

@@ -78,11 +78,13 @@ def write_all(outdir, labels, refs, chroms, segs, he, nocall, chrom_rows, fit, w
         for j in np.argsort(-p.max(axis=0)):
             fh.write(pattern_names[j] + "\t" + "\t".join(f"{p[k, j]:.5f}" for k in range(S)) + "\n")
     with open(os.path.join(outdir, "resolution.tsv"), "w") as fh:
-        fh.write("recipient\tdonor\tllr_per_window\twindow_bp\ttau_at_min\tmin_he_bp\tmedian_chrom_bp\tresolvable\n")
+        fh.write("recipient\tdonor\tllr_per_window\twindow_bp\ttau_at_min\tmin_he_bp\tmedian_chrom_bp\tresolvable"
+                 "\tss_div_baseline\n")
         for r in res:
             fh.write(f"{labels[r['recipient']]}\t{labels[r['donor']]}\t{r['llr_per_window']:.3f}\t"
                      f"{r['window_bp']:.0f}\t{_f(r['tau_at_min'])}\t{_f(r['min_he_bp'], 6)}\t"
-                     f"{r['median_chrom_bp']:.0f}\t{'yes' if r['resolvable'] else 'no'}\n")
+                     f"{r['median_chrom_bp']:.0f}\t{'yes' if r['resolvable'] else 'no'}\t"
+                     f"{_f(r.get('ss_div_baseline'))}\n")
         fh.write(f"# breakpoint rate (per bp): segmentation HMM {fit['rho']:.4g}; calibrated prior {fit['rho_cal']:.4g}\n")
         fh.write("# serial correlation of window evidence (native windows), lag: rho = "
                  + ", ".join(f"{k}:{fit['rho_ac'][k]:.2f}" for k in (1, 2, 5, 10, 20, 50, 100) if k < fit['rho_ac'].size) + "\n")
