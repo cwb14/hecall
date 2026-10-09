@@ -14,6 +14,10 @@ import subprocess
 
 from . import params as PR
 
+
+class HecallError(Exception):
+    """A fatal, explained error (bad input, missing tool, failed external command)."""
+
 TOOLS = ("FastGA", "ALNchain", "ALNtoPAF", "PAFtoALN", "FAtoGDB", "GIXmake", "GIXrm", "GDBshow")
 
 
@@ -25,7 +29,7 @@ def find_tools():
     for t in TOOLS:
         p = os.path.join(d, t) if d else shutil.which(t)
         if not p or not os.access(p, os.X_OK):
-            raise SystemExit(f"hecall: required tool '{t}' not found (put the FASTGA directory on PATH "
+            raise HecallError(f"hecall: required tool '{t}' not found (put the FASTGA directory on PATH "
                              f"or set HECALL_FASTGA)")
         paths[t] = p
     return paths
@@ -43,7 +47,7 @@ def run(cmd, log, tools, stdout=None):
         lf.flush()
         r = subprocess.run(cmd, stdout=stdout or lf, stderr=lf, env=_env(tools))
     if r.returncode != 0:
-        raise SystemExit(f"hecall: command failed ({r.returncode}): {' '.join(cmd)}; see {log}")
+        raise HecallError(f"hecall: command failed ({r.returncode}): {' '.join(cmd)}; see {log}")
 
 
 def make_gdb(fasta, gdb_root, tools, log):
@@ -71,7 +75,7 @@ def _prefilter_keep(raw, threads, tools):
                      dtype={"q": "category", "t": "category", "st": "category"})
     p.wait()
     if p.returncode != 0:
-        raise SystemExit(f"hecall: ALNtoPAF failed on {raw}")
+        raise HecallError(f"hecall: ALNtoPAF failed on {raw}")
     qs, qe = df["qs"].to_numpy(np.int64), df["qe"].to_numpy(np.int64)
     ts, te = df["ts"].to_numpy(np.int64), df["te"].to_numpy(np.int64)
     fw = (df["st"] == "+").to_numpy()
@@ -143,19 +147,30 @@ def _filter_via_paf(raw, keep, qs, pre, query_gdb, target_gdb, threads, tools, l
         for line in p.stdout:
             if n >= keep.size or int(line.split(b"\t", 3)[2]) != qs[n]:
                 p.kill()
-                raise SystemExit(f"hecall: ALNtoPAF passes over {raw} disagree at line {n + 1}")
+                raise HecallError(f"hecall: ALNtoPAF passes over {raw} disagree at line {n + 1}")
             if keep[n]:
                 fo.write(line)
             n += 1
     p.wait()
     if p.returncode != 0 or n != keep.size:
-        raise SystemExit(f"hecall: ALNtoPAF -x on {raw} gave {n} lines, expected {keep.size}")
+        raise HecallError(f"hecall: ALNtoPAF -x on {raw} gave {n} lines, expected {keep.size}")
     srcs = [query_gdb + ".1gdb"] + ([target_gdb + ".1gdb"] if target_gdb is not None else [])
     run([tools["PAFtoALN"], f"-T{threads}", pre + ".paf"] + srcs, log, tools)
 
 
-def paf_stream(chain_1aln, threads, tools, swap=False):
-    """Popen streaming PAF lines with short cs tags from a .1aln (query = first genome)."""
+def paf_stream(chain_1aln, threads, tools, swap=False, tmpdir=None):
+    """Popen streaming PAF lines with short cs tags from a .1aln, grouped by query.
+
+    ALNtoPAF writes records in order of the first genome. With swap (-w) the second genome becomes
+    the query, so its records are interleaved; they are then sorted by query name (external sort,
+    bounded memory) so that consumers can stream one query sequence at a time."""
     cmd = [tools["ALNtoPAF"], "-s", f"-T{threads}"] + (["-w"] if swap else []) + [chain_1aln]
-    return subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-                            env=_env(tools), bufsize=1 << 20)
+    if not swap:
+        return subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+                                env=_env(tools), bufsize=1 << 20)
+    import shlex
+    tmp = tmpdir or os.path.dirname(os.path.abspath(chain_1aln))
+    pipe = (" ".join(shlex.quote(c) for c in cmd) + " 2>/dev/null | LC_ALL=C sort -t $'\\t' -k1,1 -s "
+            f"-S 2G -T {shlex.quote(tmp)}")
+    return subprocess.Popen(["bash", "-o", "pipefail", "-c", pipe], stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL, text=True, env=_env(tools), bufsize=1 << 20)

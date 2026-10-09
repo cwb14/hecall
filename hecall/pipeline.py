@@ -13,6 +13,7 @@ from multiprocessing import Pool
 import numpy as np
 
 from . import align, extract, inputs, model, sites, windows, calls, output, plot
+from .align import HecallError
 from . import params as PR
 
 
@@ -83,10 +84,10 @@ def run(subgenome_args, ref_args, outdir, threads=8, verbose=False, keep_work=Tr
     subs = [inputs.parse_labelled(a, "subgenome") for a in subgenome_args]
     refs = [inputs.parse_labelled(a, "reference") for a in ref_args]
     if len(refs) < PR.MIN_REFS_COVERED:
-        raise SystemExit(f"hecall: need at least {PR.MIN_REFS_COVERED} reference genomes (-r)")
+        raise HecallError(f"hecall: need at least {PR.MIN_REFS_COVERED} reference genomes (-r)")
     names = [r[0] for r in refs]
     if len(set(names)) != len(names):
-        raise SystemExit("hecall: reference names must be unique (use -r NAME=path)")
+        raise HecallError("hecall: reference names must be unique (use -r NAME=path)")
     chroms, labels = inputs.chromosome_table(subs)
     S, K = len(labels), len(refs)
     log(f"start: {len(chroms)} polyploid chromosomes in {S} subgenomes ({', '.join(labels)}); "
@@ -173,7 +174,7 @@ def run(subgenome_args, ref_args, outdir, threads=8, verbose=False, keep_work=Tr
     # ---- windows
     dtyp = windows.typical_closest_divergence(data)
     if not dtyp > 0:
-        raise SystemExit("hecall: no divergence between the polyploid and its closest references; nothing to tell apart")
+        raise HecallError("hecall: no divergence between the polyploid and its closest references; nothing to tell apart")
     cmin = int(math.ceil(PR.WINDOW_MISMATCHES / dtyp))
     span0 = [np.diff(np.vstack(windows.build(data[c["name"]]["cov"], data[c["name"]]["mm"], cmin, 1 << 60)), axis=0)[0]
              for c in chroms]
@@ -193,7 +194,7 @@ def run(subgenome_args, ref_args, outdir, threads=8, verbose=False, keep_work=Tr
                      "Xraw": model.features(cov, mm) if s0.size else np.zeros((0, K - 1))})
     nwin = sum(w["start"].size for w in wins)
     if nwin == 0:
-        raise SystemExit("hecall: no evaluable windows (references do not align to the polyploid)")
+        raise HecallError("hecall: no evaluable windows (references do not align to the polyploid)")
     Xall = np.vstack([w["Xraw"] for w in wins])
     proj = model.lda(Xall, np.concatenate([np.full(w["start"].size, w["label"]) for w in wins]), S)
     for w in wins:

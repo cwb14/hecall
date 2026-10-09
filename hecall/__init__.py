@@ -1,2 +1,2 @@
 """hecall: homoeologous exchange calling in polyploid genome assemblies."""
-__version__ = "0.3.5"
+__version__ = "0.3.6"

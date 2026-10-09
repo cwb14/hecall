@@ -20,4 +20,10 @@ def main(argv=None):
     ap.add_argument("--version", action="version", version=f"hecall {__version__}")
     a = ap.parse_args(argv)
     from . import pipeline
-    return pipeline.run(a.subgenome, a.ref, a.outdir, threads=a.threads, verbose=a.verbose)
+    from .align import HecallError
+    try:
+        return pipeline.run(a.subgenome, a.ref, a.outdir, threads=a.threads, verbose=a.verbose)
+    except HecallError as e:
+        msg = str(e)
+        print(msg if msg.startswith("hecall:") else f"hecall: {msg}", flush=True)
+        return 1

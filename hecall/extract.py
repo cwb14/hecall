@@ -12,6 +12,7 @@ import os
 import numpy as np
 
 from . import align, sites
+from .align import HecallError
 
 
 def _flush(outdir, qname, qlen, recs):
@@ -55,7 +56,7 @@ def extract_source(chain, source, chrom_len, workdir, tools, threads, target_set
         if q != cur:
             if cur is not None:
                 if cur in seen:
-                    raise SystemExit(f"hecall: PAF from {chain} is not grouped by query ({cur})")
+                    raise HecallError(f"hecall: PAF from {chain} is not grouped by query ({cur})")
                 _flush(outdir, cur, chrom_len[cur], recs)
                 seen.add(cur)
             cur, recs = q, []
@@ -64,7 +65,7 @@ def extract_source(chain, source, chrom_len, workdir, tools, threads, target_set
         _flush(outdir, cur, chrom_len[cur], recs)
     p.wait()
     if p.returncode != 0:
-        raise SystemExit(f"hecall: ALNtoPAF failed on {chain}")
+        raise HecallError(f"hecall: ALNtoPAF failed on {chain}")
     alnf.close()
     open(done, "w").close()
 

@@ -5,6 +5,7 @@ import re
 import subprocess
 
 from . import align
+from .align import HecallError
 
 
 def parse_labelled(arg, kind):
@@ -14,10 +15,10 @@ def parse_labelled(arg, kind):
     else:
         lab, path = None, arg
     if not os.path.exists(path):
-        raise SystemExit(f"hecall: {kind} file not found: {path}")
+        raise HecallError(f"hecall: {kind} file not found: {path}")
     if lab is None:
         if kind == "subgenome":
-            raise SystemExit(f"hecall: subgenome needs a label, e.g. -s A={path}")
+            raise HecallError(f"hecall: subgenome needs a label, e.g. -s A={path}")
         lab = re.sub(r"\.(fa|fasta|fna)(\.gz)?$", "", os.path.basename(path))
     return lab, os.path.abspath(path)
 
@@ -53,12 +54,12 @@ def chromosome_table(subgenomes):
     for lab, path in subgenomes:
         for name, n in fasta_lengths(path):
             if name in seen:
-                raise SystemExit(f"hecall: chromosome name '{name}' occurs twice among subgenome files")
+                raise HecallError(f"hecall: chromosome name '{name}' occurs twice among subgenome files")
             seen.add(name)
             chroms.append({"name": name, "length": n, "label": lab, "label_idx": labels.index(lab),
                            "file": path})
     if len(labels) < 2:
-        raise SystemExit("hecall: need at least two subgenomes (-s) to call homoeologous exchanges")
+        raise HecallError("hecall: need at least two subgenomes (-s) to call homoeologous exchanges")
     return chroms, labels
 
 
@@ -78,7 +79,7 @@ def concat_fastas(paths, out):
                             break
                         fo.write(b)
             else:
-                raise SystemExit("hecall: give subgenome FASTAs either all gzipped or all plain")
+                raise HecallError("hecall: give subgenome FASTAs either all gzipped or all plain")
     os.replace(tmp, out)
     return out
 
@@ -88,7 +89,7 @@ def gdb_gaps(gdb_root, tools):
     r = subprocess.run([tools["GDBshow"], "-h", gdb_root + ".1gdb"], capture_output=True, text=True,
                        env=align._env(tools))
     if r.returncode != 0:
-        raise SystemExit(f"hecall: GDBshow failed on {gdb_root}")
+        raise HecallError(f"hecall: GDBshow failed on {gdb_root}")
     contigs = {}
     pat = re.compile(r"[<\[](\d+),(\d+)[>\]] :: Contig")
     for line in r.stdout.splitlines():
