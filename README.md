@@ -31,17 +31,25 @@ hecall also says where it cannot tell.
 ## How it works (one paragraph)
 
 Every reference genome is aligned to the polyploid with FastGA, keeping only syntenic chains
-(ALNchain). Along each polyploid chromosome, hecall builds windows that each hold the same
-information: enough compared bases for ~10 mismatches to the closest reference. In each window it
-measures how much closer the polyploid is to one reference than to another. How these
-measurements are spread for "A-donor" and "B-donor" sequence is learned from the polyploid's own A
-and B subgenomes. Native quirks (incomplete lineage sorting, divergent reference haplotypes,
-hard-to-align regions) are therefore part of what is expected, not evidence of exchange. A hidden
-Markov model proposes stretches whose origin differs from their chromosome's subgenome. Their
-breakpoints are then placed between single diagnostic bases. Each candidate's evidence is
+(ALNchain); the polyploid's subgenomes are aligned to each other the same way. Along each polyploid
+chromosome, hecall builds windows that each hold the same information. A window is long enough
+that native sequence and sequence from the other subgenome are expected to differ clearly in how
+far they are from the references. In each window it measures how much closer the polyploid is to
+one reference than to another. How these measurements are spread for each origin is learned only
+from that subgenome's own chromosomes. Native quirks (incomplete lineage sorting, divergent
+reference haplotypes, hard-to-align regions) are therefore part of what is expected, not evidence
+of exchange.
+
+A hidden Markov model proposes stretches whose origin differs from their chromosome's subgenome.
+Their breakpoints are then placed between single diagnostic bases. Each candidate's evidence is
 discounted for the correlation between neighbouring windows that native sequence shows, before it
-gets a quality score. The polyploid's own homoeologue gives an independent check: a swapped piece
-(reciprocal), or two near-identical copies (non-reciprocal).
+gets a quality score. A candidate must also look like sequence of the donor's origin against every
+reference, not merely be unlike its own. The polyploid's own homoeologue gives an independent
+check: a swapped piece (reciprocal), or two near-identical copies (non-reciprocal).
+
+hecall also says when no call can be made: regions that align to too few references (`nocall.bed`),
+subgenome pairs it cannot tell apart, and labels that are not real subgenomes (e.g. phased
+haplotypes).
 
 ## Run
 
