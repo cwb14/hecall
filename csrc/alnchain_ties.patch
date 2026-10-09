@@ -1,0 +1,71 @@
+--- ALNchain.c
++++ ALNchain.c
+@@ -135,22 +135,26 @@
+   return ((low + high) / 2);
+ }
+ 
+-// place k at the right position
+-// positions lower than k has smaller values
+-// positions higher than k has larger values
+-static int partition(TNODE *nodes, int *order, int low, int high, int k, int (*position)(TNODE *))
+-{ int i, j, p;
+-  p = position(nodes + order[k]);
+-  swap(&order[k], &order[high]);
+-  i = low;
+-  for (j = low; j < high; j++)
+-    { if (position(nodes + order[j]) <= p)
+-        { swap(&order[i], &order[j]);
+-          i++;
+-        }
++// three-way partition around the value at k: [low,lt) smaller, [lt,*eqhi] equal, (*eqhi,high] larger;
++// returns lt. Ties stay in the middle block, so many equal positions cannot make quickSelect quadratic
++static int partition(TNODE *nodes, int *order, int low, int high, int k, int (*position)(TNODE *),
++                     int *eqhi)
++{ int i, lt, gt, p, v;
++  p  = position(nodes + order[k]);
++  lt = low;
++  gt = high;
++  i  = low;
++  while (i <= gt)
++    { v = position(nodes + order[i]);
++      if (v < p)
++        swap(&order[lt++], &order[i++]);
++      else if (v > p)
++        swap(&order[i], &order[gt--]);
++      else
++        i++;
+     }
+-  swap(&order[i], &order[high]);
+-  return (i);
++  *eqhi = gt;
++  return (lt);
+ }
+ 
+ static int quickSelect(TNODE *nodes, int *order, int low, int high, int k, int (*position)(TNODE *));
+@@ -183,17 +187,17 @@
+   return (quickSelect(nodes, order, low, low + n - 1, low + n / 2, position));
+ }
+ 
+-// partition by median
++// partition by median (three-way: ties with the pivot never degrade the recursion)
+ static int quickSelect(TNODE *nodes, int *order, int low, int high, int k, int (*position)(TNODE *))
+-{ int i;
+-  i = selectPivot(nodes, order, low, high, position);
+-  i = partition(nodes, order, low, high, i, position);
+-  if (i == k)
+-    return (k);
+-  else if (i > k)
+-    return (quickSelect(nodes, order, low, i - 1, k, position));
++{ int i, lt, gt;
++  i  = selectPivot(nodes, order, low, high, position);
++  lt = partition(nodes, order, low, high, i, position, &gt);
++  if (k < lt)
++    return (quickSelect(nodes, order, low, lt - 1, k, position));
++  else if (k > gt)
++    return (quickSelect(nodes, order, gt + 1, high, k, position));
+   else
+-    return (quickSelect(nodes, order, i + 1, high, k, position));
++    return (k);
+ }
+ 
+ TNODE *buildKDTree(TNODE *nodes, int *order, int low, int high, int depth)

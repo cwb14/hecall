@@ -32,7 +32,16 @@ def find_tools():
             raise HecallError(f"hecall: required tool '{t}' not found (put the FASTGA directory on PATH "
                              f"or set HECALL_FASTGA)")
         paths[t] = p
+    tie_safe = _repo_bin("ALNchain")  # csrc/build.sh: upstream ALNchain + alnchain_ties.patch
+    if tie_safe:
+        paths["ALNchain"] = tie_safe
     return paths
+
+
+def _repo_bin(name):
+    """An executable built by csrc/build.sh into bin/ of this repository, or None."""
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", name)
+    return p if os.access(p, os.X_OK) else None
 
 
 def _env(tools):
@@ -133,10 +142,7 @@ def align_chain(query_gdb, target_gdb, out_root, threads, tmpdir, tools, log):
 
 def find_alnfilter():
     """The alnfilter helper (csrc/build.sh -> bin/alnfilter in this repository), or on PATH."""
-    here = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "alnfilter")
-    if os.access(here, os.X_OK):
-        return here
-    return shutil.which("alnfilter")
+    return _repo_bin("alnfilter") or shutil.which("alnfilter")
 
 
 def _filter_via_paf(raw, keep, qs, pre, query_gdb, target_gdb, threads, tools, log):
