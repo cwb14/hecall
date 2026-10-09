@@ -73,3 +73,4 @@ def test_missing_homoeologue_is_reported(tmp_path):
     assert float(rows["pA_chr3"]["pct_homoeolog_B"]) < 5
     assert float(rows["pA_chr1"]["pct_homoeolog_B"]) > 80
     assert rows["pA_chr1"]["pct_homoeolog_A"] == "."
+

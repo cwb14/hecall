@@ -256,6 +256,19 @@ Output (one directory per polyploid):
     threaded stream is now redone with one thread, with a warning.
   - Each extraction worker is a parser process plus ALNtoPAF. ALNtoPAF now gets at most half a
     worker's share of `-t` (previously a fixed 2 threads per worker, so up to ~3x oversubscription).
+- 2026-10-09 v0.4.5: label coherence (issue #2).
+  - The model assumes each label is one subgenome of one origin, with exchanges a minority.
+    Coherence is the share of a label's evaluable sequence painted with its own origin. Below one
+    half, the label is not a subgenome, and calls involving it get FILTER `incoherent_label`.
+  - Batch evidence (own-origin share per label):
+    - Rosa 'Carola' (phased haplotypes, numbered per chromosome): 0.22–0.46 for all four labels
+    - Magallana (subgenomes not assigned to species): A 0.27, G 0.85
+    - GR-A3n (auratus/gibelio homologue recombination): Au 0.30, Cu 0.94, G 0.91
+    - every other complex: >= 0.71 for every label. Actinidia (polysomic) is borderline at
+      0.53–0.64 and is reported, not filtered.
+  - With two labels the share rarely falls below 0.5 by construction (the majority origin becomes
+    the label's state). It falls in practice when a label mixes several origins or the states
+    overlap heavily.
 - 2026-10-08 v0.3.5: synteny check has three classes:
   - `homoeologous`
   - `translocation`: one collinear chain on another chromosome or position, spanning at least half

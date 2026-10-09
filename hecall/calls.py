@@ -261,12 +261,31 @@ def _candidates(segs, homsegs, scale, ctx):
     return he
 
 
-def _filters(h, resolvable):
+def label_coherence(chroms, segs, S):
+    """Share of each label's evaluable sequence painted with that label's own origin.
+
+    The model assumes every label is a subgenome of one origin, with exchanges a minority. Below one
+    half, most of the label is of another origin: the labels are not subgenomes (e.g. phased
+    haplotypes numbered independently per chromosome, or subgenomes the input mis-assigned), and
+    exchange calls involving that label are not interpretable."""
+    own, tot = np.zeros(S), np.zeros(S)
+    for c in chroms:
+        for s in segs[c["name"]]:
+            if not s.get("nosites"):
+                L = s["tile_end"] - s["tile_start"]
+                tot[c["label_idx"]] += L
+                own[c["label_idx"]] += L * (s["state"] == c["label_idx"])
+    return [float(own[i] / tot[i]) if tot[i] else float("nan") for i in range(S)]
+
+
+def _filters(h, resolvable, incoherent=()):
     filt = []
     if h["qual"] < PR.QUAL_PASS:
         filt.append("LowQual")
     if not resolvable[(h["label_idx"], h["donor_idx"])]:
         filt.append("unresolvable_pair")
+    if h["label_idx"] in incoherent or h["donor_idx"] in incoherent:
+        filt.append("incoherent_label")
     if h["syntenic"] == "nonsyntenic":
         filt.append("nonsyntenic")
     return ";".join(filt) or "PASS"
@@ -311,6 +330,12 @@ def make_calls(mchroms, chroms, labels, fit, wins, slogp, data, gaps, work, ref_
     inull = IdentityNull(chroms, data)
     segs_by = [(name, _segments(mchroms, chroms, wins, p, fit["binned"], slogp)) for name, p in posts]
     fine = segs_by[0][1]
+    coherence = label_coherence(chroms, fine, S)
+    incoherent = {i for i in range(S) if coherence[i] < 0.5}
+    if incoherent and tables is None:  # once per run (make_calls runs per scale set)
+        log("calls: WARNING: " + ", ".join(f"label {labels[i]} is {100 * coherence[i]:.0f}% its own origin"
+                                          for i in sorted(incoherent))
+            + "; not a coherent subgenome, so calls involving it are filtered (incoherent_label)")
     log("calls: synteny and homoeologue checks", detail=True)
     if tables is None:
         tables = ({s: extract.load_aln(work, s) for s in ref_sources},
@@ -344,7 +369,7 @@ def make_calls(mchroms, chroms, labels, fit, wins, slogp, data, gaps, work, ref_
         resolvable = {(r["recipient"], r["donor"]): r["resolvable"] for r in res}
         calibrate(cands, rho, fit["rho_ac"], span, S)
         for h in cands:
-            h["filter"] = _filters(h, resolvable)
+            h["filter"] = _filters(h, resolvable, incoherent)
         he = _select(cands)
         nbp = sum(int(h["bp_left_ci"] != "terminal") + int(h["bp_right_ci"] != "terminal")
                   for h in he if h["filter"] == "PASS")
@@ -355,6 +380,7 @@ def make_calls(mchroms, chroms, labels, fit, wins, slogp, data, gaps, work, ref_
         rho = new
     for r in res:  # genome-wide homoeologue divergence, also when there are no calls
         r["ss_div_baseline"] = base[(r["recipient"], r["donor"])]
+        r["recipient_own_origin"] = coherence[r["recipient"]]
     log(f"calls: calibrated breakpoint rate {rho:.3g}/bp; serial correlation tau(5 windows)="
         f"{tau_n(fit['rho_ac'], 5):.1f}, tau(100)={tau_n(fit['rho_ac'], 100):.1f}; "
         + ", ".join(f"scale {n}: {sum(h['scale'] == n and h['filter'] == 'PASS' for h in he)} PASS"

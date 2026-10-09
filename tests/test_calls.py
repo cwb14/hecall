@@ -36,3 +36,19 @@ def test_synteny_classes_homoeologous_translocation_transposed_repeat():
             [(1_000_000, 1_006_000, True, "Z", 40_000_000, 40_006_000)])
     cls, _ = calls.syntenic(c, 1_000_000, 1_006_000, 1_000_000, 1_006_000)
     assert cls == "nonsyntenic"
+
+
+def test_label_coherence_and_filter():
+    """A label painted mostly with other origins is not a subgenome: its calls are filtered."""
+    from hecall import calls
+    chroms = [{"name": "c1", "label_idx": 0}, {"name": "c2", "label_idx": 0}, {"name": "c3", "label_idx": 1}]
+    seg = lambda a, b, s: {"tile_start": a, "tile_end": b, "state": s}
+    segs = {"c1": [seg(0, 100, 1), seg(100, 130, 0)],          # label 0 chromosomes mostly state 1
+            "c2": [seg(0, 100, 2), {"tile_start": 100, "tile_end": 900, "state": 0, "nosites": True}],
+            "c3": [seg(0, 95, 1), seg(95, 100, 0)]}
+    coh = calls.label_coherence(chroms, segs, 3)
+    assert abs(coh[0] - 30 / 230) < 1e-9 and abs(coh[1] - 0.95) < 1e-9 and coh[2] != coh[2]   # nan
+    h = {"qual": 99, "label_idx": 1, "donor_idx": 0, "syntenic": "homoeologous"}
+    res = {(1, 0): True}
+    assert calls._filters(h, res, incoherent={0}) == "incoherent_label"
+    assert calls._filters(h, res, incoherent=set()) == "PASS"

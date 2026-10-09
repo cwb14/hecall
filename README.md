@@ -74,6 +74,10 @@ Reruns resume from checkpoints in `out/work/`.
   - `PASS`
   - `LowQual` (QUAL < 20)
   - `unresolvable_pair` (the data cannot tell these two donors apart)
+  - `incoherent_label`: the recipient or donor label is less than half its own origin, so it is not
+    a subgenome. Typical causes are haplotypes numbered independently per chromosome, or
+    subgenomes the input mis-assigned. resolution.tsv gives each label's own-origin share
+    (`recipient_own_origin`), and the log warns.
   - `nonsyntenic` (the matching reference sequence is neither at the homoeologous position nor
     one long collinear block elsewhere: transposed repeat, scattered hits or misassembly)
 - **`type`**:
