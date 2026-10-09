@@ -250,6 +250,12 @@ Output (one directory per polyploid):
   - Not changed: a no-re-estimation variant (labels only) lowers foreign painting further, but every
     real exchange then also enters its recipient's density, which costs power in exchange-rich
     genomes (Actinidia, 16%).
+- 2026-10-09 v0.4.4: extraction robustness and thread budget.
+  - Multi-threaded `ALNtoPAF -s` segfaults intermittently (an upstream race, FASTGA 178afcb). Rosa
+    hap3 vs hap4 crashes with -T2 to -T8; -T1 always works and gives the same records. A failed
+    threaded stream is now redone with one thread, with a warning.
+  - Each extraction worker is a parser process plus ALNtoPAF. ALNtoPAF now gets at most half a
+    worker's share of `-t` (previously a fixed 2 threads per worker, so up to ~3x oversubscription).
 - 2026-10-08 v0.3.5: synteny check has three classes:
   - `homoeologous`
   - `translocation`: one collinear chain on another chromosome or position, spanning at least half

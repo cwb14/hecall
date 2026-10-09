@@ -8,6 +8,7 @@ and one alignment table per source (no cs): work/codes/<source>.aln.tsv.gz
 """
 import gzip
 import os
+import sys
 
 import numpy as np
 
@@ -38,6 +39,19 @@ def extract_source(chain, source, chrom_len, workdir, tools, threads, target_set
     if os.path.exists(done):
         return
     os.makedirs(outdir, exist_ok=True)
+    # multi-threaded ALNtoPAF -s can crash (an upstream race; FASTGA 178afcb, Rosa); single-threaded
+    # output is identical, so a failed threaded stream is redone with one thread
+    for t in ([threads, 1] if threads > 1 else [1]):
+        if _extract_once(chain, outdir, chrom_len, workdir, tools, t, target_set, swap, tag):
+            open(done, "w").close()
+            return
+        sys.stderr.write(f"hecall: warning: ALNtoPAF -T{t} failed on {chain}"
+                         + ("; retrying with one thread\n" if t > 1 else "\n"))
+    raise HecallError(f"hecall: ALNtoPAF failed on {chain}")
+
+
+def _extract_once(chain, outdir, chrom_len, workdir, tools, threads, target_set, swap, tag):
+    """One pass over the PAF stream; False if ALNtoPAF failed (outputs are then rewritten)."""
     alnf = gzip.open(os.path.join(workdir, "codes", f"{tag}.aln.tsv.gz"), "wt", compresslevel=3)
     cur, recs = None, []
     seen = set()
@@ -64,10 +78,8 @@ def extract_source(chain, source, chrom_len, workdir, tools, threads, target_set
     if cur is not None:
         _flush(outdir, cur, chrom_len[cur], recs)
     p.wait()
-    if p.returncode != 0:
-        raise HecallError(f"hecall: ALNtoPAF failed on {chain}")
     alnf.close()
-    open(done, "w").close()
+    return p.returncode == 0
 
 
 def load_codes(workdir, source, chrom, length):

@@ -55,3 +55,18 @@ def test_alnchain_many_tied_end_positions(tmp_path):
     r = subprocess.run([tools["ALNchain"], f"-o{tmp_path / 'c.1aln'}", str(tmp_path / "x.1aln")],
                        env=env, timeout=60, capture_output=True)
     assert r.returncode == 0
+
+
+def test_extraction_retries_single_threaded(tmp_path, monkeypatch):
+    """A crashing multi-threaded ALNtoPAF (upstream race, FASTGA 178afcb) is redone with one thread."""
+    from hecall import extract
+    paf = tmp_path / "x.paf"
+    paf.write_text("q1\t100\t0\t10\t+\tt1\t100\t0\t10\t10\t10\t60\tcs:Z::10\n")
+    fake = tmp_path / "ALNtoPAF"
+    fake.write_text(f"#!/bin/bash\ncase \"$*\" in *-T1*) cat {paf};; *) exit 139;; esac\n")
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    tools = {t: str(fake) for t in align.TOOLS}
+    (tmp_path / "codes").mkdir()
+    extract.extract_source("chain.1aln", "ref0", {"q1": 100}, str(tmp_path), tools, 4)
+    assert (tmp_path / "codes" / "ref0.done").exists()
+    assert (tmp_path / "codes" / "ref0" / "q1.npy").exists()

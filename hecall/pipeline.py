@@ -166,8 +166,12 @@ def run(subgenome_args, ref_args, outdir, threads=8, verbose=False, keep_work=Tr
             cl_j = {c["name"]: c["length"] for c in chroms if c["label_idx"] == j}
             jobs.append((ch, f"ss_{labels[j]}", cl_i, work, tools, 2, None, False, f"ss_{labels[j]}.from_{labels[i]}"))
             jobs.append((ch, f"ss_{labels[i]}", cl_j, work, tools, 2, None, True, f"ss_{labels[i]}.from_{labels[j]}"))
+    # each worker is a parser process plus ALNtoPAF: give ALNtoPAF at most half of a worker's share
+    workers = min(threads, len(jobs))
+    per = max(1, threads // (2 * workers))
+    jobs = [j[:5] + (per,) + j[6:] for j in jobs]
     log("extract: per-base comparison with each reference and homoeologue")
-    for src in _parallel(_extract_worker, jobs, min(threads, len(jobs)), "extract"):
+    for src in _parallel(_extract_worker, jobs, workers, "extract"):
         log(f"  extracted {src}", detail=True)
 
     # ---- sites
