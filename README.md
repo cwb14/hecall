@@ -74,6 +74,10 @@ Reruns resume from checkpoints in `out/work/`.
   - `PASS`
   - `LowQual` (QUAL < 20)
   - `unresolvable_pair` (the data cannot tell these two donors apart)
+  - `donor_misfit`: the segment is farther from every reference than donor-origin sequence ever
+    is at that length, so it is not a copy of the donor. Typical causes are paralogous or
+    repeat alignments, or a haplotype missing from the references. `p_donor_fit` is the test's
+    p-value; the null is runs of the same number of native windows of the donor subgenome.
   - `incoherent_label`: the recipient or donor label is less than half its own origin, so it is not
     a subgenome. Typical causes are haplotypes numbered independently per chromosome, or
     subgenomes the input mis-assigned. resolution.tsv gives each label's own-origin share

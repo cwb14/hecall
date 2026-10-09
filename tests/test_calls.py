@@ -52,3 +52,18 @@ def test_label_coherence_and_filter():
     res = {(1, 0): True}
     assert calls._filters(h, res, incoherent={0}) == "incoherent_label"
     assert calls._filters(h, res, incoherent=set()) == "PASS"
+
+
+def test_donor_fit_rejects_sequence_far_from_every_reference():
+    """A candidate farther from every reference than any run of the donor's native windows is not
+    donor-origin sequence (paralogous alignments; v0.4.9)."""
+    from hecall import calls
+    rng = np.random.default_rng(7)
+    n = 3000
+    cov = np.full((n, 2), 1000)
+    mm = np.column_stack([rng.poisson(5, n), rng.poisson(50, n)])      # donor native: 0.5% / 5%
+    wins = [{"label": 1, "cov": cov, "mm": mm}]
+    fit = calls.DonorFit(wins, [np.ones(n, dtype=int)], 2)
+    like = fit.p(1, np.full((20, 2), 1000), np.column_stack([rng.poisson(5, 20), rng.poisson(50, 20)]))
+    far = fit.p(1, np.full((20, 2), 1000), np.column_stack([rng.poisson(40, 20), rng.poisson(45, 20)]))
+    assert like > 0.05 and far < 0.01

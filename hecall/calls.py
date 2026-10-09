@@ -116,6 +116,52 @@ def code_stats(work, source, chrom, a, b):
     return int(((c >= 1) & (c <= 5)).sum()), int(((c >= 2) & (c <= 5)).sum())
 
 
+def _closest_div(cov, mm):
+    """Divergence to the closest reference from summed compared bases / mismatches (..., K)."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        d = np.where(cov > 0, mm / np.maximum(cov, 1), np.inf)
+    return d.min(axis=-1)
+
+
+class DonorFit:
+    """Is a candidate as close to the references as sequence of the donor's origin can be?
+
+    Null: runs of the same number of consecutive native windows of the donor subgenome (windows on
+    its own chromosomes assigned to it; serial correlation kept). p = share of null runs at least as
+    far from their closest reference as the candidate (with +1 smoothing)."""
+
+    def __init__(self, wins, assign, S, seed=0):
+        self.series = {s: [] for s in range(S)}
+        for w, a in zip(wins, assign):
+            keep = a == w["label"]
+            if keep.sum() < 2:
+                continue
+            cov, mm = w["cov"][keep], w["mm"][keep]
+            z = np.zeros((1, cov.shape[1]), dtype=np.int64)
+            self.series[w["label"]].append((np.vstack([z, np.cumsum(cov, 0)]), np.vstack([z, np.cumsum(mm, 0)])))
+        self.rng = np.random.default_rng(seed)
+
+    def p(self, donor, cov, mm):
+        """cov, mm: the candidate's window counts (n, K)."""
+        n = cov.shape[0]
+        obs = float(_closest_div(cov.sum(0), mm.sum(0)))
+        ser = self.series.get(donor, [])
+        if not ser or not np.isfinite(obs):
+            return 1.0
+        longest = max(c.shape[0] - 1 for c, _ in ser)
+        n = min(n, longest)                 # longer than any native run: shorter null runs are wider (conservative)
+        ok = [(c, m) for c, m in ser if c.shape[0] - 1 >= n]
+        starts = np.array([c.shape[0] - n for c, _ in ok], dtype=float)
+        pick = self.rng.choice(len(ok), PR.DONOR_FIT_DRAWS, p=starts / starts.sum())
+        null = np.empty(PR.DONOR_FIT_DRAWS)
+        for j in np.unique(pick):
+            c, m = ok[j]
+            idx = np.flatnonzero(pick == j)
+            st = self.rng.integers(0, c.shape[0] - n, idx.size)
+            null[idx] = _closest_div(c[st + n] - c[st], m[st + n] - m[st])
+        return float((1 + (null >= obs).sum()) / (1 + null.size))
+
+
 class IdentityNull:
     """Matched-span reference for homoeologue identity: divergence between each subgenome-s
     chromosome and its subgenome-t homoeologue over sliding blocks of the same span, genome-wide.
@@ -185,9 +231,9 @@ def _segments(mchroms, chroms, wins, posts, binned_list, slogp):
 def _candidates(segs, homsegs, scale, ctx):
     """Non-native segments of one segmentation scale -> candidate HE records with evidence.
     homsegs: the fine-scale segmentation, used to type the homoeologue's origin."""
-    (mchroms, chroms, labels, slogp, gaps, work, ref_sources, ref_aln, ss_aln, inull, base, name2chrom) = ctx
+    (mchroms, chroms, labels, slogp, gaps, work, ref_sources, ref_aln, ss_aln, inull, base, name2chrom, dfit, wins) = ctx
     he = []
-    for m, c in zip(mchroms, chroms):
+    for ci, (m, c) in enumerate(zip(mchroms, chroms)):
         s_i = c["label_idx"]
         pid = m["site_pid"]
         # contiguous blocks of non-native segments (any donor): their native flanks vouch for synteny
@@ -245,7 +291,9 @@ def _candidates(segs, homsegs, scale, ctx):
                     and ss_d >= base[(s_i, t_i)]):
                 flags.append("homoeolog_not_closer")
             p_id = inull.p(s_i, t_i, b - a, ss_d, ssc) if hom_type == "non-reciprocal" and ssc else 1.0
-            he.append({"label_idx": s_i, "donor_idx": t_i, "p_identity": p_id, "scale": scale,
+            wa, wb = seg["win_a"], seg["win_b"]
+            p_fit = dfit.p(t_i, wins[ci]["cov"][wa:wb], wins[ci]["mm"][wa:wb]) if wb > wa else 1.0
+            he.append({"label_idx": s_i, "donor_idx": t_i, "p_identity": p_id, "p_donor_fit": p_fit, "scale": scale,
                        "chrom": c["name"], "label": labels[s_i], "donor": labels[t_i],
                        "start": a, "end": b, "length": b - a, "n_windows": seg["win_b"] - seg["win_a"],
                        "bp_left_ci": "terminal" if seg["terminal_left"] else f"{seg['bp_left'][2]}-{seg['bp_left'][3]}",
@@ -286,6 +334,8 @@ def _filters(h, resolvable, incoherent=()):
         filt.append("unresolvable_pair")
     if h["label_idx"] in incoherent or h["donor_idx"] in incoherent:
         filt.append("incoherent_label")
+    if h.get("p_donor_fit", 1.0) < PR.DONOR_FIT_P:
+        filt.append("donor_misfit")
     if h["syntenic"] == "nonsyntenic":
         filt.append("nonsyntenic")
     return ";".join(filt) or "PASS"
@@ -328,6 +378,7 @@ def make_calls(mchroms, chroms, labels, fit, wins, slogp, data, gaps, work, ref_
     rho_cal, tables); `tables` (loaded alignment tables) can be passed back in to avoid reloading."""
     S = len(labels)
     inull = IdentityNull(chroms, data)
+    dfit = DonorFit(wins, fit["assign"], S)
     segs_by = [(name, _segments(mchroms, chroms, wins, p, fit["binned"], slogp)) for name, p in posts]
     fine = segs_by[0][1]
     coherence = label_coherence(chroms, fine, S)
@@ -349,7 +400,7 @@ def make_calls(mchroms, chroms, labels, fit, wins, slogp, data, gaps, work, ref_
                 num = sum(int(data[c["name"]]["ss_mm"][t_i].sum()) for c in chroms if c["label_idx"] == s_i)
                 den = sum(int(data[c["name"]]["ss_cov"][t_i].sum()) for c in chroms if c["label_idx"] == s_i)
                 base[(s_i, t_i)] = num / den if den else float("nan")
-    ctx = (mchroms, chroms, labels, slogp, gaps, work, ref_sources, ref_aln, ss_aln, inull, base, name2chrom)
+    ctx = (mchroms, chroms, labels, slogp, gaps, work, ref_sources, ref_aln, ss_aln, inull, base, name2chrom, dfit, wins)
     cands = []
     for name, sg in segs_by:
         cands += _candidates(sg, fine, name, ctx)

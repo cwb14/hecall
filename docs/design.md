@@ -305,6 +305,17 @@ Output (one directory per polyploid):
   - Validated swaps are unchanged offline (A. suecica, O. minuta, Musa Plantain, Fragaria).
   - dh <= d1 (Rosa haplotypes: 0.22% between, 0.51% to the references): origin cannot be told apart.
     Windows fall back to the closest-reference rule for painting, and every pair is unresolvable.
+- 2026-10-09 v0.4.9: donor fit.
+  - A call must look like sequence of the donor's origin. Null: runs of the same number of
+    consecutive native windows of the donor subgenome (serial correlation kept). Statistic: the
+    divergence to the closest reference. p < 0.01 gives FILTER `donor_misfit`.
+  - Why: emission densities only see contrasts, so windows far from every reference (paralogues,
+    repeats, haplotypes absent from the references) can land in a foreign state's tail.
+    - Avena magna x longiglumis (references = parents): 7 calls are 0.00005–0.25% from the donor
+      parent, i.e. textbook exchanges. About 36 are 3–14% from every reference.
+    - Seen earlier: Digitaria chr04D, Raphanobrassica C3.
+  - A crude per-window p99 version flagged 41/1331 PASS calls, concentrated in Avena magna (22/43)
+    and A. hypogaea (17/54).
 - 2026-10-08 v0.3.5: synteny check has three classes:
   - `homoeologous`
   - `translocation`: one collinear chain on another chromosome or position, spanning at least half
