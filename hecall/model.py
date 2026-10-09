@@ -155,9 +155,15 @@ def fit_hmm(binned, labels, S, rho=PR.RHO_INIT, verbose=None):
     return post, rho, pi, logL
 
 
-def autocorrelation(series, max_lag=PR.TAU_MAX_LAG):
+def autocorrelation(series, max_lag=None):
     """Autocorrelation of window evidence at lags 0..max_lag, pooled over chromosomes, truncated
-    where Geyer's initial positive sequence ends (first non-positive sum of a lag pair -> 0)."""
+    where Geyer's initial positive sequence ends (first non-positive sum of a lag pair -> 0).
+
+    No fixed cap by default (max lag = longest series): in genomes whose native evidence wanders
+    over megabases (stand-in references, introgression), a cap would understate the correlation
+    of long blocks and overstate their significance (v0.4.6, Avena agadiriana)."""
+    if max_lag is None:
+        max_lag = max([x.size - 1 for x in series] + [1])
     num = np.zeros(max_lag + 1)
     den = 0.0
     for x in series:

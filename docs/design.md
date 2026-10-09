@@ -269,6 +269,17 @@ Output (one directory per polyploid):
   - With two labels the share rarely falls below 0.5 by construction (the majority origin becomes
     the label's state). It falls in practice when a label mixes several origins or the states
     overlap heavily.
+- 2026-10-09 v0.4.6: no lag cap on the autocorrelation of native-window evidence.
+  - The 2000-window cap (TAU_MAX_LAG) was arbitrary. Where native evidence wanders over megabases,
+    the cap understated the correlation of long blocks and overstated their significance.
+    Examples: stand-in references, introgression, recombination-poor cereal chromosomes. Geyer's
+    initial positive sequence now decides the truncation alone (FFT, so any lag is cheap).
+  - Avena agadiriana (proxy references ~4.5% from both subgenomes): Geyer cut 2000 -> 13,328 lags,
+    integrated tau 281 -> 652. Large-call log-odds fall 2–4×; 4 of 11 PASS fall below 0.
+  - Cost: Saccharum chr02S 66–97 Mb (published So block, QUAL 24 before) is expected to fall to
+    log-odds ~ -0.3 (LowQual). Kept anyway: a defensible rule over a tuned one. With Saccharum's
+    long-range native wander, the data alone do not separate a 31-Mb block from it.
+  - Calls spanning <= 2000 windows are unchanged.
 - 2026-10-08 v0.3.5: synteny check has three classes:
   - `homoeologous`
   - `translocation`: one collinear chain on another chromosome or position, spanning at least half

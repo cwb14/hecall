@@ -49,9 +49,6 @@ KDE_GRID = {1: 400, 2: 100, 3: 40}
 KDE_RANGE_Q = 0.001
 KDE_PAD = 1.0
 
-# Longest lag (windows) for the autocorrelation-time estimate; Geyer's sequence normally stops much
-# earlier (first non-positive pair of lags).
-TAU_MAX_LAG = 2000
 
 # --- HMM ---------------------------------------------------------------------------------------
 # Bounds for the fitted breakpoint rate (per bp): 1e-9 = one switch per Gb, 1e-5 = one per
