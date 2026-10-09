@@ -305,6 +305,12 @@ Output (one directory per polyploid):
   - Validated swaps are unchanged offline (A. suecica, O. minuta, Musa Plantain, Fragaria).
   - dh <= d1 (Rosa haplotypes: 0.22% between, 0.51% to the references): origin cannot be told apart.
     Windows fall back to the closest-reference rule for painting, and every pair is unresolvable.
+- 2026-10-09 v0.4.10: donor fit checks every reference in both directions (Bonferroni over 2K),
+  with 4999 draws.
+  - In v0.4.9 only "farther than donor sequence from the closest reference" was tested. Avena magna
+    D chromosomes then kept "A-origin" calls that are closest to the D reference (1.4% to D vs 4.1%
+    to A). The A reference is not the exact A parent, so A-native sequence is itself 3–5% from
+    every reference, and the one-sided test let these through.
 - 2026-10-09 v0.4.9: donor fit.
   - A call must look like sequence of the donor's origin. Null: runs of the same number of
     consecutive native windows of the donor subgenome (serial correlation kept). Statistic: the

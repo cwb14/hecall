@@ -66,4 +66,5 @@ def test_donor_fit_rejects_sequence_far_from_every_reference():
     fit = calls.DonorFit(wins, [np.ones(n, dtype=int)], 2)
     like = fit.p(1, np.full((20, 2), 1000), np.column_stack([rng.poisson(5, 20), rng.poisson(50, 20)]))
     far = fit.p(1, np.full((20, 2), 1000), np.column_stack([rng.poisson(40, 20), rng.poisson(45, 20)]))
-    assert like > 0.05 and far < 0.01
+    near_other = fit.p(1, np.full((20, 2), 1000), np.column_stack([rng.poisson(5, 20), rng.poisson(6, 20)]))
+    assert like > 0.05 and far < 0.01 and near_other < 0.01   # too close to the other reference too

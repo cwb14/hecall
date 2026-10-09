@@ -124,11 +124,14 @@ def _closest_div(cov, mm):
 
 
 class DonorFit:
-    """Is a candidate as close to the references as sequence of the donor's origin can be?
+    """Does a candidate look like sequence of the donor's origin, against every reference?
 
     Null: runs of the same number of consecutive native windows of the donor subgenome (windows on
-    its own chromosomes assigned to it; serial correlation kept). p = share of null runs at least as
-    far from their closest reference as the candidate (with +1 smoothing)."""
+    its own chromosomes assigned to it; serial correlation kept). For each reference, the
+    candidate's divergence is compared with the null runs' divergence to that reference, in both
+    directions: too far from all references (paralogous or repeat alignments) and too close to a
+    reference that donor-origin sequence is not close to (a native window pulled into a broad foreign
+    state) both disqualify it. p = Bonferroni-combined minimum over references and directions."""
 
     def __init__(self, wins, assign, S, seed=0):
         self.series = {s: [] for s in range(S)}
@@ -144,22 +147,36 @@ class DonorFit:
     def p(self, donor, cov, mm):
         """cov, mm: the candidate's window counts (n, K)."""
         n = cov.shape[0]
-        obs = float(_closest_div(cov.sum(0), mm.sum(0)))
+        c_obs, m_obs = cov.sum(0), mm.sum(0)
+        seen = c_obs > 0
+        if not seen.any():
+            return 1.0
+        obs = m_obs[seen] / c_obs[seen]
         ser = self.series.get(donor, [])
-        if not ser or not np.isfinite(obs):
+        if not ser:
             return 1.0
         longest = max(c.shape[0] - 1 for c, _ in ser)
         n = min(n, longest)                 # longer than any native run: shorter null runs are wider (conservative)
         ok = [(c, m) for c, m in ser if c.shape[0] - 1 >= n]
         starts = np.array([c.shape[0] - n for c, _ in ok], dtype=float)
-        pick = self.rng.choice(len(ok), PR.DONOR_FIT_DRAWS, p=starts / starts.sum())
-        null = np.empty(PR.DONOR_FIT_DRAWS)
+        B = PR.DONOR_FIT_DRAWS
+        pick = self.rng.choice(len(ok), B, p=starts / starts.sum())
+        null = np.full((B, int(seen.sum())), np.nan)
         for j in np.unique(pick):
             c, m = ok[j]
             idx = np.flatnonzero(pick == j)
             st = self.rng.integers(0, c.shape[0] - n, idx.size)
-            null[idx] = _closest_div(c[st + n] - c[st], m[st + n] - m[st])
-        return float((1 + (null >= obs).sum()) / (1 + null.size))
+            cc, mc = (c[st + n] - c[st])[:, seen], (m[st + n] - m[st])[:, seen]
+            with np.errstate(divide="ignore", invalid="ignore"):
+                null[idx] = np.where(cc > 0, mc / np.maximum(cc, 1), np.nan)
+        pv = []
+        for k in range(obs.size):
+            v = null[:, k][np.isfinite(null[:, k])]
+            if v.size < 10:
+                continue
+            pv.append((1 + (v <= obs[k]).sum()) / (1 + v.size))
+            pv.append((1 + (v >= obs[k]).sum()) / (1 + v.size))
+        return float(min(1.0, len(pv) * min(pv))) if pv else 1.0
 
 
 class IdentityNull:

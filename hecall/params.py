@@ -74,12 +74,12 @@ MIN_TEMPER = 2.0
 # PASS threshold: QUAL 20 = posterior 0.99 (conventional evidence level).
 QUAL_PASS = 20.0
 
-# Donor fit (v0.4.9): a call must look like sequence of the donor's origin. Null = runs of the same
-# number of consecutive native windows of the donor subgenome (serial correlation kept); a call
-# farther from every reference than all but DONOR_FIT_P of those runs is not donor-origin sequence
-# (paralogous or unassembled-haplotype alignments). Conventional evidence level; draws give p to 0.001.
+# Donor fit (v0.4.9): a call must look like sequence of the donor's origin against every reference.
+# Null = runs of the same number of consecutive native windows of the donor subgenome (serial
+# correlation kept); per reference, both tails; Bonferroni over references x 2. Conventional
+# evidence level; 4999 draws keep power with up to ~25 references (min p 2e-4 x 2K < 0.01).
 DONOR_FIT_P = 0.01
-DONOR_FIT_DRAWS = 999
+DONOR_FIT_DRAWS = 4999
 QUAL_CAP = 99.0
 
 # Breakpoint credible interval mass.
