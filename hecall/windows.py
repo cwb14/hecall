@@ -12,12 +12,26 @@ from . import params as PR
 
 
 def typical_closest_divergence(data):
-    """Median over 10-kb windows of the divergence to the closest reference (all subgenomes)."""
+    """Median over blocks of the divergence to the closest reference (all subgenomes).
+
+    Blocks start at 10 kb and double while the median is zero: a median of ratios is only
+    meaningful when blocks hold mismatches, and when the references are the actual parents (e.g. a
+    synthetic polyploid) most 10-kb blocks hold none (v0.4.7, Avena magna x longiglumis)."""
+    g = max(1, 10_000 // PR.BIN_BP)
+    longest = max((d["cov"].shape[1] for d in data.values()), default=0)
+    while g <= longest:
+        med = _block_median(data, g)
+        if not med == 0:          # positive, or nan when no block is long enough
+            return med
+        g *= 2
+    return float("nan")
+
+
+def _block_median(data, g):
     vals = []
     for d in data.values():
         cov, mm = d["cov"], d["mm"]
         nb = cov.shape[1]
-        g = max(1, 10_000 // PR.BIN_BP)  # 10-kb blocks
         n = nb // g * g
         if n == 0:
             continue

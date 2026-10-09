@@ -280,6 +280,12 @@ Output (one directory per polyploid):
     log-odds ~ -0.3 (LowQual). Kept anyway: a defensible rule over a tuned one. With Saccharum's
     long-range native wander, the data alone do not separate a 31-Mb block from it.
   - Calls spanning <= 2000 windows are unchanged.
+- 2026-10-09 v0.4.7: typical closest-reference divergence uses blocks that double from 10 kb
+  until the median is non-zero.
+  - Avena magna x longiglumis synthetic hexaploid: its references are its parents, so most 10-kb
+    blocks hold no mismatch to the closest reference. The median was 0 and the run stopped with
+    "nothing to tell apart", which is the opposite of the truth.
+  - No other genome changes (all have a non-zero 10-kb median), so v0.4.6 outputs equal v0.4.7.
 - 2026-10-08 v0.3.5: synteny check has three classes:
   - `homoeologous`
   - `translocation`: one collinear chain on another chromosome or position, spanning at least half
