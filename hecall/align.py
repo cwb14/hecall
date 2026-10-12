@@ -1,8 +1,8 @@
 """Whole-genome alignment with FastGA, filtered to syntenic chains with ALNchain.
 
 FastGA (Myers) finds all local alignments >= 100 bp at >= 70% identity from adaptive seeds and is
-~5x faster and ~40x lighter in memory than minimap2 -x asm20 on a 1.2 Gb vs 0.6 Gb plant pair
-(docs/design.md, section 3). ALNchain keeps, per pair of sequences, the best-scoring collinear
+~8x faster and ~45x lighter in memory than minimap2 -x asm20 on a 1.2 Gb vs 0.6 Gb plant pair
+(docs/design.md, Alignment). ALNchain keeps, per pair of sequences, the best-scoring collinear
 chains (one-to-one), which removes most isolated repeat alignments. Defaults of both tools are
 kept: on Coffea they reproduce minimap2's primary-chain coverage and divergence.
 
@@ -107,7 +107,7 @@ def _prefilter_keep(raw, threads, tools):
 
 
 def align_chain(query_gdb, target_gdb, out_root, threads, tmpdir, tools, log):
-    """FastGA query vs target (or query vs itself when target is None) -> chained .1aln.
+    """FastGA query vs target -> chained .1aln.
 
     raw FastGA alignments -> collinear-run prefilter -> ALNchain (defaults). Returns the chained
     .1aln path. Checkpoints: the chained file; the raw file once FastGA has finished (.done)."""
@@ -117,10 +117,8 @@ def align_chain(query_gdb, target_gdb, out_root, threads, tmpdir, tools, log):
     raw = out_root + ".1aln"
     os.makedirs(tmpdir, exist_ok=True)
     if not os.path.exists(raw + ".done"):
-        cmd = [tools["FastGA"], f"-T{threads}", f"-P{tmpdir}", f"-1:{raw}", query_gdb + ".1gdb"]
-        if target_gdb is not None:
-            cmd.append(target_gdb + ".1gdb")
-        run(cmd, log, tools)
+        run([tools["FastGA"], f"-T{threads}", f"-P{tmpdir}", f"-1:{raw}", query_gdb + ".1gdb",
+             target_gdb + ".1gdb"], log, tools)
         open(raw + ".done", "w").close()
     keep, qs = _prefilter_keep(raw, threads, tools)
     with open(log, "a") as lf:
@@ -160,8 +158,8 @@ def _filter_via_paf(raw, keep, qs, pre, query_gdb, target_gdb, threads, tools, l
     p.wait()
     if p.returncode != 0 or n != keep.size:
         raise HecallError(f"hecall: ALNtoPAF -x on {raw} gave {n} lines, expected {keep.size}")
-    srcs = [query_gdb + ".1gdb"] + ([target_gdb + ".1gdb"] if target_gdb is not None else [])
-    run([tools["PAFtoALN"], f"-T{threads}", pre + ".paf"] + srcs, log, tools)
+    run([tools["PAFtoALN"], f"-T{threads}", pre + ".paf", query_gdb + ".1gdb", target_gdb + ".1gdb"],
+        log, tools)
 
 
 def paf_stream(chain_1aln, threads, tools, swap=False, tmpdir=None):

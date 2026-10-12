@@ -1,5 +1,6 @@
 #!/bin/bash
 # Build hecall's C helpers against a FASTGA source tree: bash build.sh /path/to/FASTGA
+# Needs a C compiler and zlib headers; honours CC, CFLAGS and LDFLAGS (e.g. from a conda env with compilers).
 #   ../bin/alnfilter  copies the .1aln records kept by the prefilter
 #   ../bin/ALNchain   upstream ALNchain with alnchain_ties.patch: a three-way quickselect partition, so
 #                     thousands of alignments ending at one position (e.g. at a contig edge in a repeat
@@ -9,16 +10,18 @@
 set -euo pipefail
 SRC=${1:?usage: build.sh /path/to/FASTGA}
 HERE=$(cd "$(dirname "$0")" && pwd)
-BIN="$HERE/../bin"
+BIN="$(dirname "$HERE")/bin"
 LIBS=("$SRC/GDB.c" "$SRC/alncode.c" "$SRC/gene_core.c" "$SRC/ONElib.c" -lpthread -lm -lz)
+CC=${CC:-gcc}
+read -r -a FLAGS <<< "${CFLAGS:-} ${LDFLAGS:-}"
 mkdir -p "$BIN"
-gcc -O3 -Wall -fno-strict-aliasing -I"$SRC" -o "$BIN/alnfilter" "$HERE/alnfilter.c" "${LIBS[@]}"
+"$CC" -O3 -Wall -fno-strict-aliasing "${FLAGS[@]}" -I"$SRC" -o "$BIN/alnfilter" "$HERE/alnfilter.c" "${LIBS[@]}"
 echo "built $BIN/alnfilter"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 cp "$SRC/ALNchain.c" "$TMP/"
 if patch -s -d "$TMP" -p0 < "$HERE/alnchain_ties.patch"; then
-  gcc -O3 -fno-strict-aliasing -Wno-unused-result -I"$SRC" -o "$BIN/ALNchain" "$TMP/ALNchain.c" "${LIBS[@]}"
+  "$CC" -O3 -fno-strict-aliasing -Wno-unused-result "${FLAGS[@]}" -I"$SRC" -o "$BIN/ALNchain" "$TMP/ALNchain.c" "${LIBS[@]}"
   echo "built $BIN/ALNchain (tie-safe)"
 else
   rm -f "$BIN/ALNchain"

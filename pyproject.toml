@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hecall"
+dynamic = ["version"]
+description = "Call homoeologous exchanges in polyploid genome assemblies"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["numpy", "scipy", "pandas", "matplotlib"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+hecall = "hecall.cli:main"
+
+[tool.setuptools]
+packages = ["hecall"]
+
+[tool.setuptools.dynamic]
+version = {attr = "hecall.__version__"}

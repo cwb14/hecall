@@ -21,7 +21,7 @@ def _tint(hexc, f):
     return tuple(c + (1 - c) * f)
 
 
-def painting(outdir, labels, chroms, segs, he, nocall, max_rows=None):
+def painting(outdir, labels, chroms, segs, he, nocall):
     plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Arial", "Liberation Sans", "DejaVu Sans"],
                          "pdf.fonttype": 42, "svg.fonttype": "none", "font.size": 7})
     S = len(labels)
@@ -112,8 +112,12 @@ def _legend(outdir, labels, chroms, he, nocall):
             "divergence to every reference genome in windows of equal information, against the spread seen in "
             "the polyploid's own subgenomes. A homoeologous exchange (HE) is a stretch "
             "whose origin differs from the chromosome's own subgenome. PASS = posterior probability ≥ 0.99 "
-            "(QUAL ≥ 20), syntenic with the donor-like reference, and a donor/recipient pair the data can tell "
-            "apart.\n\n"
+            "(QUAL ≥ 20) after discounting correlated windows; the donor-like reference sequence lies at the "
+            "homoeologous position or in one collinear block elsewhere (translocation); the segment's divergence "
+            "to every reference lies within the range of donor-subgenome sequence of the same length (p ≥ 0.01); "
+            "the donor/recipient "
+            "pair can be told apart; and both labels are coherent subgenomes (at least half their own origin)."
+            "\n\n"
             f"Each polyploid chromosome is drawn to scale, grouped by subgenome ({', '.join(labels)}). Pale fill "
             "shows the inferred origin along the chromosome; saturated blocks are PASS HEs, coloured by donor, "
             "each marked by a triangle so that exchanges too small to see at this scale remain visible. Light "

@@ -1,7 +1,7 @@
 """Stage 2: chained alignments -> per-chromosome base codes and alignment tables.
 
-For every reference (and for the polyploid's own other subgenomes, from the self alignment) one
-worker streams PAF from the chained .1aln and writes, per polyploid chromosome:
+For every reference, and for each pairwise subgenome alignment (the polyploid's own homoeologues),
+one worker streams PAF from the chained .1aln and writes, per polyploid chromosome:
     work/codes/<source>/<chrom>.npy   uint8 codes (see sites.py)
 and one alignment table per source (no cs): work/codes/<source>.aln.tsv.gz
     qname qs qe strand tname ts te div
@@ -23,12 +23,11 @@ def _flush(outdir, qname, qlen, recs):
     os.replace(tmp, os.path.join(outdir, f"{qname}.npy"))
 
 
-def extract_source(chain, source, chrom_len, workdir, tools, threads, target_set=None, swap=False, tag=None):
+def extract_source(chain, source, chrom_len, workdir, tools, threads, swap=False, tag=None):
     """Parse one chained alignment into per-chromosome codes.
 
     chrom_len: polyploid chromosomes to extract (others in the stream are ignored).
-    target_set: if given, only alignments whose target is in this set are used (legacy self
-    alignment split by subgenome). swap: read the alignment with genomes swapped (ALNtoPAF -w), i.e.
+    swap: read the alignment with genomes swapped (ALNtoPAF -w), i.e.
     the second genome becomes the query. tag: name of this extraction's done marker and alignment
     table (default: source); several extractions may fill one source (pairwise subgenome alignments).
     Writes <workdir>/codes/<source>/<chrom>.npy and skips if <tag>.done exists.
@@ -42,7 +41,7 @@ def extract_source(chain, source, chrom_len, workdir, tools, threads, target_set
     # multi-threaded ALNtoPAF -s can crash (an upstream race; FASTGA 178afcb, Rosa); single-threaded
     # output is identical, so a failed threaded stream is redone with one thread
     for t in ([threads, 1] if threads > 1 else [1]):
-        if _extract_once(chain, outdir, chrom_len, workdir, tools, t, target_set, swap, tag):
+        if _extract_once(chain, outdir, chrom_len, workdir, tools, t, swap, tag):
             open(done, "w").close()
             return
         sys.stderr.write(f"hecall: warning: ALNtoPAF -T{t} failed on {chain}"
@@ -50,7 +49,7 @@ def extract_source(chain, source, chrom_len, workdir, tools, threads, target_set
     raise HecallError(f"hecall: ALNtoPAF failed on {chain}")
 
 
-def _extract_once(chain, outdir, chrom_len, workdir, tools, threads, target_set, swap, tag):
+def _extract_once(chain, outdir, chrom_len, workdir, tools, threads, swap, tag):
     """One pass over the PAF stream; False if ALNtoPAF failed (outputs are then rewritten)."""
     alnf = gzip.open(os.path.join(workdir, "codes", f"{tag}.aln.tsv.gz"), "wt", compresslevel=3)
     cur, recs = None, []
@@ -59,7 +58,7 @@ def _extract_once(chain, outdir, chrom_len, workdir, tools, threads, target_set,
     for line in p.stdout:
         f = line.rstrip("\n").split("\t")
         q, t = f[0], f[5]
-        if q not in chrom_len or (target_set is not None and t not in target_set) or q == t:
+        if q not in chrom_len:
             continue
         cs = next((x[5:] for x in f[12:] if x.startswith("cs:Z:")), None)
         if cs is None:

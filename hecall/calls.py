@@ -1,9 +1,8 @@
 """Segments -> HE calls with quality, independent evidence and artifact flags."""
+import math
 import os
 
 import numpy as np
-
-import math
 
 from . import extract, model
 from .model import tau_n
@@ -387,7 +386,7 @@ def _select(cands):
 
 
 def make_calls(mchroms, chroms, labels, fit, wins, slogp, data, gaps, work, ref_sources, log,
-               posts, rho_start=None, tables=None):
+               posts, tables=None):
     """Segmentations at one or more scales -> scored, non-overlapping HE calls.
 
     posts: [(scale name, per-chromosome posteriors)]; the first is the fine (untempered) scale, whose
@@ -431,7 +430,7 @@ def make_calls(mchroms, chroms, labels, fit, wins, slogp, data, gaps, work, ref_
         sp = [w["end"] - w["start"] for w in wins if w["label"] == s_i and w["end"].size]
         span[s_i] = float(np.median(np.concatenate(sp))) if sp else 1.0
     evaluated = float(sum((w["end"] - w["start"]).sum() for w in wins))
-    rho = rho_start if rho_start is not None else PR.RHO_MIN
+    rho = PR.RHO_MIN
     for _ in range(200):
         res = model.resolution(fit, wins, S, rho, fit["rho_ac"])
         if fit.get("no_contrast"):

@@ -1,5 +1,5 @@
 """Output tables: he.tsv, he.gff3, segments.bed, nocall.bed, chromosomes.tsv, profiles.tsv,
-resolution.tsv, bins.tsv.gz."""
+resolution.tsv, windows.tsv.gz."""
 import gzip
 import math
 import os

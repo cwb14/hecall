@@ -1,13 +1,13 @@
 """Per-base comparison of the polyploid (PAF query) with each reference (PAF target).
 
-For one polyploid chromosome and one reference, `codes_from_paf` returns a uint8 array over the
+For one polyploid chromosome and one reference, `codes_for_chrom` returns a uint8 array over the
 chromosome:
     0 uncovered, 1 match, 2..5 mismatch (reference allele A,C,G,T on the polyploid's forward
     strand), 6 ambiguous (covered by more than one alignment of this reference).
 Only SNVs are recorded; query bases inside insertions/deletions stay uncovered (0).
 """
 import re
-import gzip
+
 import numpy as np
 
 UNCOV, MATCH, AMBIG = 0, 1, 6
@@ -15,28 +15,6 @@ _BASE = {"a": 2, "c": 3, "g": 4, "t": 5}
 _COMP = {"a": "t", "c": "g", "g": "c", "t": "a"}
 _CS_OP = re.compile(r":(\d+)|\*([a-z])([a-z])|\+([a-z]+)|-([a-z]+)")
 SYMBOLS = ".Mabcd"  # pattern alphabet: uncovered, match, distinct mismatching alleles
-
-
-def open_text(path):
-    return gzip.open(path, "rt") if str(path).endswith(".gz") else open(path)
-
-
-def paf_records(path):
-    """Yield (qname, qlen, qs, qe, strand, tname, ts, te, cs, div) for PAF lines with a cs tag.
-
-    div = 1 - matching bases / alignment block length (PAF columns 10, 11)."""
-    with open_text(path) as fh:
-        for line in fh:
-            f = line.rstrip("\n").split("\t")
-            cs = None
-            for tag in f[12:]:
-                if tag.startswith("cs:Z:"):
-                    cs = tag[5:]
-                    break
-            if cs is None:
-                continue
-            div = 1.0 - int(f[9]) / max(int(f[10]), 1)
-            yield (f[0], int(f[1]), int(f[2]), int(f[3]), f[4], f[5], int(f[7]), int(f[8]), cs, div)
 
 
 def fill_codes(codes, qs, qe, strand, cs):

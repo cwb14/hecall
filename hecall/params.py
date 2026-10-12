@@ -80,6 +80,9 @@ QUAL_PASS = 20.0
 # evidence level; 4999 draws keep power with up to ~25 references (min p 2e-4 x 2K < 0.01).
 DONOR_FIT_P = 0.01
 DONOR_FIT_DRAWS = 4999
+
+# QUAL ceiling (error probability 10^-9.9): beyond this, model misspecification, not the data,
+# would set the number.
 QUAL_CAP = 99.0
 
 # Breakpoint credible interval mass.
@@ -103,7 +106,7 @@ SYNTENY_FLANK_MAX_BP = 5_000_000
 # repeat hits elsewhere on the chromosome fall outside).
 CHAIN_TOL_MIN_BP = 1_000_000
 
-# A homoeologue is assigned to an HE segment only if the self alignment covers at least this
+# A homoeologue is assigned to an HE segment only if the subgenome alignment covers at least this
 # fraction of it (otherwise 'unpaired').
 HOMOEOLOG_MIN_COVER = 0.25
 # Identity null: blocks (and segments) need homoeologue-compared bases over at least this fraction

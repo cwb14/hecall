@@ -4,7 +4,7 @@ States = polyploid subgenomes. A window's observation is its vector of SNV diver
 reference; the emission density of each state is learned (KDE) from the polyploid's own windows
 of that subgenome, so native heterogeneity (incomplete lineage sorting, introgression, divergent
 reference haplotypes, hard-to-align regions) is part of each state's expected spread rather than
-evidence of exchange. Single-site evidence is used only to place breakpoints (see design 2.3).
+evidence of exchange. Single-site evidence is used only to place breakpoints.
 """
 import math
 

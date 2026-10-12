@@ -1,0 +1,13 @@
+# mamba env create -f environment.yml && mamba activate hecall
+name: hecall
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python>=3.9
+  - numpy
+  - scipy
+  - pandas
+  - matplotlib-base
+  - pytest
+  - fastga=1.5.20260729   # FASTGA commit 178afcb, the version hecall was validated with
