@@ -8,6 +8,8 @@ dynamic = ["version"]
 description = "Call homoeologous exchanges in polyploid genome assemblies"
 readme = "README.md"
 requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [{name = "cwb14"}]
 dependencies = ["numpy", "scipy", "pandas", "matplotlib"]
 
 [project.optional-dependencies]

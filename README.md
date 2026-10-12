@@ -230,3 +230,7 @@ hecall runs the FASTGA suite (FastGA, ALNchain, ALNtoPAF and others; ONElib) by 
 Chenxi Zhou and Richard Durbin: <https://github.com/thegenemyers/FASTGA> (BSD-style licence).
 `csrc/alnchain_ties.patch` modifies FASTGA's `ALNchain.c`, and `csrc/alnfilter.c` is compiled
 against FASTGA sources.
+
+## License
+
+MIT (see `LICENSE`). The FASTGA suite has its own BSD-style licence.
